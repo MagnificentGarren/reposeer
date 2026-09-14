@@ -1,0 +1,26 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "reposeer-backend"
+version = "0.1.0"
+description = "Reposeer Studio Static Analysis & AI Inspection Engine"
+authors = ["Garren Gabron"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.110.0"
+uvicorn = {extras = ["standard"], version = "^0.28.0"}
+sqlmodel = "^0.0.16"
+asyncpg = "^0.29.0"
+redis = "^5.0.3"
+tree-sitter = "^0.21.3"
+tree-sitter-python = "^0.21.0"
+litellm = "^1.31.0"
+instructor = "^1.1.0"
+langgraph = "^0.0.26"
+pydantic = "^2.6.4"
+python-dotenv = "^1.0.1"
+gitpython = "^3.1.42"
+networkx = "^3.2.1"
