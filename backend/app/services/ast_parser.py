@@ -1,27 +1,23 @@
 import tree_sitter_python as tspython  # type: ignore
 from tree_sitter import Language, Parser  # type: ignore
 
-
-def _load_python_language():
-    language = tspython.language()
-    try:
-        return Language(language, "python")
-    except TypeError:
-        return language
-
-
-PY_LANGUAGE = _load_python_language()
+# tree-sitter-python 0.21+ / tree-sitter 0.22+ returns the Language instance directly
+PY_LANGUAGE = Language(tspython.language())
 
 
 class PythonASTParser:
     """Statically parses Python code to extract structural metadata using Tree-Sitter."""
 
     def __init__(self):
-        self.parser = Parser()
-        if hasattr(self.parser, "set_language"):
-            self.parser.set_language(PY_LANGUAGE)
-        else:
-            self.parser.language = PY_LANGUAGE
+        # Pass the language object directly into the Parser constructor
+        try:
+            self.parser = Parser(PY_LANGUAGE)
+        except TypeError:
+            self.parser = Parser()
+            if hasattr(self.parser, "set_language"):
+                self.parser.set_language(PY_LANGUAGE)
+            else:
+                self.parser.language = PY_LANGUAGE
 
     def parse_code(self, file_path: str, code: str) -> dict:
         """Parses source code string and returns extracted classes, functions, and imports."""
