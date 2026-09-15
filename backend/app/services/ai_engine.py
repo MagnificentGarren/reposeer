@@ -50,7 +50,7 @@ def evaluate_architecture_node(state: WorkflowState) -> dict:
                 {"role": "user", "content": prompt},
             ],
             response_model=InspectionReport,
-            max_tokens=4096,
+            max_tokens=8192,
             temperature=0.2,
         )
         return {"report": response.model_dump()}

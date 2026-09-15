@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional
 
 
 class ArchitecturalScore(BaseModel):
@@ -27,3 +28,10 @@ class InspectionReport(BaseModel):
     scores: ArchitecturalScore
     roast: CodeRoast
     interview_questions: list[InterviewQuestion]
+
+class SeerChatRequest(BaseModel):
+    query: str
+    report_context: Optional[Dict[str, Any]] = None
+
+class SeerChatResponse(BaseModel):
+    response: str
