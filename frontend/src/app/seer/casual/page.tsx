@@ -264,13 +264,32 @@ export default function SeerCasualPage() {
                   className={`max-w-2xl rounded-2xl p-5 text-sm leading-relaxed ${
                     msg.sender === "user"
                       ? "bg-emerald-500 text-slate-950 font-medium rounded-tr-none shadow-[0_0_15px_rgba(16,185,129,0.2)] whitespace-pre-wrap"
-                      : "bg-slate-950/80 border border-emerald-500/20 text-slate-200 rounded-tl-none shadow-md prose prose-invert prose-emerald max-w-none text-sm prose-p:my-1 prose-ul:my-1 prose-li:my-0.5"
+                      : "bg-slate-950/80 border border-emerald-500/20 text-slate-200 rounded-tl-none shadow-md prose prose-invert prose-emerald max-w-none text-sm prose-p:my-3 prose-ul:my-1 prose-li:my-0.5"
                   }`}
                 >
                   {msg.sender === "user" ? (
                     msg.text
                   ) : (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({ children }) => (
+                          <p className="mb-4 last:mb-0 leading-relaxed text-slate-200">{children}</p>
+                        ),
+                        ul: ({ children }) => (
+                          <ul className="my-4 space-y-2 list-disc pl-5 text-slate-200">{children}</ul>
+                        ),
+                        ol: ({ children }) => (
+                          <ol className="my-4 space-y-2 list-decimal pl-5 text-slate-200">{children}</ol>
+                        ),
+                        li: ({ children }) => (
+                          <li className="leading-relaxed">{children}</li>
+                        ),
+                        strong: ({ children }) => (
+                          <strong className="font-bold text-emerald-400">{children}</strong>
+                        ),
+                      }}
+                    >
                       {msg.text}
                     </ReactMarkdown>
                   )}

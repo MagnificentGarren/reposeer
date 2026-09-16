@@ -98,14 +98,15 @@ export default function SeerResultsPage() {
               position: n.position || { x, y },
               data: { label: displayLabel },
               style: {
-                background: "#022c22",
+                background: "rgba(2, 44, 34, 0.85)",
                 color: "#6ee7b7",
-                border: "1px solid #10b981",
+                border: "1px solid rgba(16, 185, 129, 0.4)",
                 borderRadius: "12px",
                 padding: "10px 16px",
                 fontSize: "12px",
                 fontWeight: "600",
-                boxShadow: "0 0 15px rgba(16,185,129,0.2)",
+                backdropFilter: "blur(8px)",
+                boxShadow: "0 0 20px rgba(16, 185, 129, 0.15)",
               },
             };
           });
@@ -168,8 +169,8 @@ export default function SeerResultsPage() {
   if (!report) {
     return (
       <div className="min-h-screen bg-[#030908] text-slate-100 flex flex-col items-center justify-center p-6">
-        <div className="text-center space-y-4 max-w-md bg-emerald-950/20 border border-emerald-500/30 p-8 rounded-3xl">
-          <h2 className="text-2xl font-bold text-emerald-400">No Report Context Found</h2>
+        <div className="text-center space-y-4 max-w-md bg-emerald-950/20 border border-emerald-500/30 p-8 rounded-3xl backdrop-blur-md shadow-[0_0_30px_rgba(16,185,129,0.1)]">
+          <h2 className="text-2xl font-bold text-emerald-400 tracking-tight">No Report Context Found</h2>
           <p className="text-slate-400 text-sm">
             Run an analysis from the Seer hub to populate architectural metrics.
           </p>
@@ -240,7 +241,7 @@ export default function SeerResultsPage() {
               <span className="text-emerald-400">❖</span> Architecture Inspection Dashboard
             </h1>
             <p className="text-[11px] text-slate-400">
-              {filesParsed} Files Parsed • {nodes.length} Module Nodes Extracted
+              {filesParsed} Files Analysed • {nodes.length} Module Nodes Extracted
             </p>
           </div>
         </div>
@@ -292,7 +293,7 @@ export default function SeerResultsPage() {
                 fitView
               >
                 <Background color="#064e3b" gap={20} size={1} />
-                <Controls className="bg-slate-900 border-emerald-500/30 text-slate-200 fill-slate-200" />
+                <Controls className="bg-slate-900/80 border border-emerald-500/30 text-slate-200 fill-slate-200 backdrop-blur-md rounded-lg overflow-hidden" />
               </ReactFlow>
             ) : (
               <div className="flex h-full items-center justify-center text-slate-500 text-sm">
@@ -304,9 +305,9 @@ export default function SeerResultsPage() {
 
         {activeTab === "ai" && (
           <div className="max-w-4xl mx-auto p-8 space-y-6">
-            <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-6 space-y-4">
-              <h3 className="text-lg font-bold text-emerald-400">Executive Summary</h3>
-              <p className="text-slate-300 text-sm leading-relaxed">
+            <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-6 space-y-4 backdrop-blur-md shadow-[0_0_20px_rgba(16,185,129,0.05)]">
+              <h3 className="text-lg font-bold text-emerald-400 tracking-wide">Executive Summary</h3>
+              <p className="text-slate-300 text-sm leading-relaxed font-mono">
                 {typeof report.ai_report === "string"
                   ? report.ai_report
                   : report.ai_report?.summary ||
@@ -316,11 +317,11 @@ export default function SeerResultsPage() {
             </div>
 
             {report.ai_report?.insights && (
-              <div className="bg-slate-950/60 border border-emerald-500/20 rounded-2xl p-6 space-y-3">
-                <h3 className="text-lg font-bold text-slate-200">Architectural Insights</h3>
+              <div className="bg-slate-950/60 border border-emerald-500/20 rounded-2xl p-6 space-y-3 backdrop-blur-md">
+                <h3 className="text-lg font-bold text-slate-200 tracking-wide">Architectural Insights</h3>
                 <ul className="list-disc list-inside text-slate-400 text-sm space-y-2">
                   {report.ai_report.insights.map((item: string, idx: number) => (
-                    <li key={idx}>{item}</li>
+                    <li key={idx} className="leading-relaxed">{item}</li>
                   ))}
                 </ul>
               </div>
@@ -330,19 +331,25 @@ export default function SeerResultsPage() {
 
         {activeTab === "ast" && (
           <div className="max-w-5xl mx-auto p-8 space-y-4">
-            <h3 className="text-lg font-bold text-emerald-400">Parsed Modules ({astSummary.length})</h3>
-            <div className="grid gap-3">
+            <div className="flex items-center justify-between pb-2 border-b border-emerald-950/40">
+              <h3 className="text-lg font-bold text-emerald-400 tracking-wide">
+                Analysed Modules ({astSummary.length})
+              </h3>
+              <span className="text-xs text-slate-400">AST Structural Breakdown</span>
+            </div>
+
+            <div className="grid gap-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-emerald-950 scrollbar-track-transparent">
               {astSummary.map((item: any, idx: number) => (
                 <div
                   key={idx}
-                  className="bg-slate-950/80 border border-emerald-500/20 p-4 rounded-xl flex items-center justify-between"
+                  className="bg-emerald-950/20 border border-emerald-500/20 p-4 rounded-xl flex items-center justify-between hover:border-emerald-500/40 transition-all backdrop-blur-md"
                 >
                   <span className="font-mono text-sm text-slate-200">{item.path}</span>
                   <div className="flex gap-2">
-                    <span className="px-2.5 py-1 bg-emerald-950 text-emerald-400 text-xs font-semibold rounded-md border border-emerald-500/30">
+                    <span className="px-2.5 py-1 bg-emerald-950/80 text-emerald-400 text-xs font-semibold rounded-md border border-emerald-500/30">
                       {item.classes} Classes
                     </span>
-                    <span className="px-2.5 py-1 bg-slate-900 text-slate-300 text-xs font-semibold rounded-md border border-slate-700">
+                    <span className="px-2.5 py-1 bg-slate-900/80 text-slate-300 text-xs font-semibold rounded-md border border-slate-700/60">
                       {item.functions} Functions
                     </span>
                   </div>

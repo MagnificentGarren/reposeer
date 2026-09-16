@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import inspect
-from app.api import chat
+from app.api import chat, inspect, interview
 
 app = FastAPI(
     title="Reposeer Studio API",
@@ -21,6 +21,7 @@ app.add_middleware(
 # Mount inspection routes under /api/inspect
 app.include_router(inspect.router, prefix="/api/inspect", tags=["Inspection"])
 app.include_router(chat.router, prefix="/api/seer", tags=["Casual Chat"])
+app.include_router(interview.router, prefix="/api/interview", tags=["Interview"])
 
 
 @app.get("/")

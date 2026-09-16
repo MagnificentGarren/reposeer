@@ -6,7 +6,6 @@ from app.models.schemas import SeerChatRequest, SeerChatResponse
 
 router = APIRouter()
 
-# Initialize Google GenAI client (uses GEMINI_API_KEY environment variable)
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
@@ -17,7 +16,6 @@ async def seer_casual_chat(payload: SeerChatRequest):
 
     context = payload.report_context or {}
 
-    # Extract metrics matching your InspectionReport schema structure
     files_analyzed = context.get("files_analyzed", 0)
     ai_report = context.get("ai_report") or {}
 
@@ -37,12 +35,16 @@ async def seer_casual_chat(payload: SeerChatRequest):
         if isinstance(f, dict) and f.get("relative_path") is not None
     ]
 
-    # Formulate System Instruction tailored for casual mode
     system_instruction = (
         "You are Reposeer Casual Assistant, an executive AI software architect explaining repository structures "
         "and architectural health to product managers, tech leads, and non-technical stakeholders.\n"
         "Your tone is clear, engaging, professional, and direct. Avoid unnecessary technical jargon unless "
         "you explain it simply using analogies. Prioritise maintainability, business risks, modularity, and actionable takeaways.\n\n"
+        "STRICT LANGUAGE AND FORMATTING RULES:\n"
+        "1. You MUST use standard UK English spelling and vocabulary throughout (e.g., summarise, initialise, analyse, organisation, prioritisation, colour).\n"
+        "2. Do NOT output dense walls of text.\n"
+        "3. Ensure EVERY paragraph, recommendation, and list item is separated by a DOUBLE newline (\\n\\n).\n"
+        "4. Place blank space between introductory sentences, bullet points, and concluding points.\n\n"
         "CURRENT REPOSITORY CONTEXT:\n"
         f"- Total Files Parsed: {files_analyzed}\n"
         f"- Maintainability Score: {maintainability}/100\n"
@@ -51,8 +53,7 @@ async def seer_casual_chat(payload: SeerChatRequest):
         f"- Executive Overview: {summary_roast}\n"
         f"- Key Architectural Flaws Identified: {', '.join(key_flaws) if key_flaws else 'None reported'}\n"
         f"- Sample High-Level Modules: {', '.join(sample_files) if sample_files else 'Not specified'}\n\n"
-        "Answer the user's prompt using the context above. If they ask about risks, focus on coupling and testability scores. "
-        "If they ask for high-level summaries, focus on overall system maintainability."
+        "Answer the user's prompt using the context above."
     )
 
     try:
@@ -65,9 +66,12 @@ async def seer_casual_chat(payload: SeerChatRequest):
             ),
         )
 
-        return SeerChatResponse(
-            response=response.text or "I wasn't able to generate a response based on the current context."
-        )
+        raw_text = response.text or "I wasn't able to generate a response based on the current context."
+
+        # Post-process: Guarantee double newlines across all paragraphs & list breaks
+        formatted_text = "\n\n".join([line.strip() for line in raw_text.splitlines() if line.strip()])
+
+        return SeerChatResponse(response=formatted_text)
 
     except Exception as e:
         print(f"[Reposeer Chat Error]: {str(e)}")

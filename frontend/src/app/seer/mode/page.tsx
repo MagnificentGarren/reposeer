@@ -44,13 +44,13 @@ export default function ModeSelectionPage() {
 import "go.o"
 func inspection_pipeline(target: string) {
     data := load_ast_nodes(target)
-    whoc_hocar, spopatle := analyze_coupling(data)
+    whoc_hocar, spopatle := analyse_coupling(data)
     return {
         system: _data_processing,
         metrics: graph_density(data)
     }
 }
-// Preditoring, Heatmap, telemetry stream active
+// Prediction, Heatmap, telemetry stream active
 func data_struct() {
     dame: string
     name: string
@@ -69,7 +69,7 @@ func data_struct() {
 
         <nav className="hidden md:flex items-center gap-8 text-sm text-slate-400 font-medium">
           <Link href="/" className="hover:text-emerald-400 transition-colors">Home</Link>
-          <Link href="/about" className="hover:text-emerald-400 transition-colors">About us</Link>
+          <Link href="/about" className="hover:text-emerald-400 transition-colors">About Us</Link>
           <Link href="/work" className="hover:text-emerald-400 transition-colors">Work</Link>
           <Link href="/info" className="hover:text-emerald-400 transition-colors">Info</Link>
         </nav>
@@ -105,14 +105,14 @@ func data_struct() {
           <button
             type="button"
             onClick={() => setSelectedMode("casual")}
-            className={`group relative text-left p-8 rounded-3xl transition-all duration-300 flex flex-col items-center justify-between border ${
+            className={`group relative text-left p-8 rounded-3xl backdrop-blur-xl transition-all duration-300 flex flex-col items-center justify-between border ${
               selectedMode === "casual"
-                ? "bg-gradient-to-b from-cyan-950/60 to-emerald-950/80 border-cyan-400 shadow-[0_0_30px_rgba(6,182,212,0.3)] scale-[1.02]"
-                : "bg-slate-950/40 border-slate-800/80 opacity-70 hover:opacity-100 hover:border-cyan-500/50"
+                ? "bg-gradient-to-b from-cyan-950/70 to-emerald-950/90 border-cyan-400/80 shadow-[0_0_35px_rgba(6,182,212,0.35)] scale-[1.02]"
+                : "bg-slate-950/40 border-slate-800/80 opacity-70 hover:opacity-100 hover:border-cyan-500/50 hover:bg-slate-900/40"
             }`}
           >
             {/* Card Graphic Icon */}
-            <div className="w-24 h-24 mb-6 flex items-center justify-center rounded-2xl bg-cyan-950/50 border border-cyan-500/30 text-cyan-400">
+            <div className="w-24 h-24 mb-6 flex items-center justify-center rounded-2xl bg-cyan-950/50 border border-cyan-500/30 text-cyan-400 group-hover:scale-105 transition-transform">
               <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
@@ -124,7 +124,7 @@ func data_struct() {
               </h2>
               <div className="w-full space-y-2 border-t border-cyan-500/20 pt-4 text-xs font-semibold uppercase tracking-wider text-cyan-200/80">
                 <p className="py-1 border-b border-cyan-500/10">Free Exploration Q&A</p>
-                <p className="py-1">Architecture Insight</p>
+                <p className="py-1">Architectural Insight</p>
               </div>
             </div>
           </button>
@@ -133,14 +133,14 @@ func data_struct() {
           <button
             type="button"
             onClick={() => setSelectedMode("interview")}
-            className={`group relative text-left p-8 rounded-3xl transition-all duration-300 flex flex-col items-center justify-between border ${
+            className={`group relative text-left p-8 rounded-3xl backdrop-blur-xl transition-all duration-300 flex flex-col items-center justify-between border ${
               selectedMode === "interview"
-                ? "bg-gradient-to-b from-amber-950/60 to-orange-950/80 border-orange-400 shadow-[0_0_30px_rgba(249,115,22,0.3)] scale-[1.02]"
-                : "bg-slate-950/40 border-slate-800/80 opacity-70 hover:opacity-100 hover:border-orange-500/50"
+                ? "bg-gradient-to-b from-amber-950/70 to-orange-950/90 border-orange-400/80 shadow-[0_0_35px_rgba(249,115,22,0.35)] scale-[1.02]"
+                : "bg-slate-950/40 border-slate-800/80 opacity-70 hover:opacity-100 hover:border-orange-500/50 hover:bg-slate-900/40"
             }`}
           >
             {/* Card Graphic Icon */}
-            <div className="w-24 h-24 mb-6 flex items-center justify-center rounded-2xl bg-orange-950/50 border border-orange-500/30 text-orange-400">
+            <div className="w-24 h-24 mb-6 flex items-center justify-center rounded-2xl bg-orange-950/50 border border-orange-500/30 text-orange-400 group-hover:scale-105 transition-transform">
               <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
