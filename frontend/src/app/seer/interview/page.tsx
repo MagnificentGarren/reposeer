@@ -15,7 +15,6 @@ export default function SeerInterviewPage() {
   const [questionData, setQuestionData] = useState<{
     question: string;
     target_flaw: string;
-    snippet: string;
   } | null>(null);
 
   const [candidateAnswer, setCandidateAnswer] = useState("");
@@ -84,7 +83,6 @@ export default function SeerInterviewPage() {
         body: JSON.stringify({
             question: questionData.question,
             candidate_answer: candidateAnswer,
-            code_snippet: questionData.snippet,
             difficulty,
         }),
     });
@@ -149,7 +147,7 @@ export default function SeerInterviewPage() {
         </div>
       </header>
 
-      {/* 3-PANEL SPLIT ENVIRONMENT */}
+      {/* INTERVIEW WORKSPACE */}
       <div className="flex-1 grid grid-cols-12 overflow-hidden">
         {/* LEFT PANEL: SESSION CONSOLE & QUESTION CONTEXT */}
         <aside className="col-span-3 border-r border-emerald-950/60 bg-[#020706] p-6 flex flex-col gap-6 overflow-y-auto">
@@ -203,26 +201,8 @@ export default function SeerInterviewPage() {
           </div>
         </aside>
 
-        {/* CENTER PANEL: CODE EDITOR & AST CONTEXT VIEWER */}
-        <section className="col-span-4 border-r border-emerald-950/60 bg-[#030908] flex flex-col overflow-hidden">
-          <div className="px-6 py-3 border-b border-emerald-950/40 flex items-center justify-between bg-[#020706]">
-            <span className="text-xs font-mono text-slate-400">AST Target Snippet Context</span>
-            <span className="text-[10px] font-mono text-emerald-400">Python 3.11</span>
-          </div>
-
-          <div className="flex-1 p-6 font-mono text-xs overflow-y-auto bg-slate-950/90 text-emerald-300/90 leading-relaxed">
-            {isGenerating ? (
-              <span className="text-slate-500">Loading code context...</span>
-            ) : questionData ? (
-              <pre className="whitespace-pre-wrap">{questionData.snippet}</pre>
-            ) : (
-              <span className="text-slate-500">No snippet loaded.</span>
-            )}
-          </div>
-        </section>
-
         {/* RIGHT PANEL: CANDIDATE RESPONSE & ANALYTICS */}
-        <section className="col-span-5 bg-[#020706] p-6 flex flex-col gap-6 overflow-y-auto">
+        <section className="col-span-9 bg-[#020706] p-6 flex flex-col gap-6 overflow-y-auto">
           <div className="flex-1 flex flex-col gap-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
               Candidate Refactoring / Architectural Pitch

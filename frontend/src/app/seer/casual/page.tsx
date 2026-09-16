@@ -32,7 +32,9 @@ export default function SeerCasualPage() {
       if (rawReport) {
         try {
           const parsedReport = JSON.parse(rawReport);
-          setReport(parsedReport.result || parsedReport);
+          // Normalise report structure
+          const rootData = parsedReport.result || parsedReport;
+          setReport(rootData);
         } catch (e) {
           console.error("Failed to parse stored report:", e);
         }
@@ -96,9 +98,13 @@ export default function SeerCasualPage() {
     if (!promptToSend.trim() || isLoading) return;
 
     const userQuery = promptToSend.trim();
-    const updatedMessages: ChatMessage[] = [...messages, { sender: "user", text: userQuery }];
+    const newMessages: ChatMessage[] = [
+      ...messages,
+      { sender: "user", text: userQuery },
+      { sender: "ai", text: "" } // Placeholder for streaming text
+    ];
     
-    setMessages(updatedMessages);
+    setMessages(newMessages);
     setInputValue("");
     setIsLoading(true);
 
@@ -112,26 +118,36 @@ export default function SeerCasualPage() {
         }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setMessages([...updatedMessages, { sender: "ai", text: data.response }]);
-      } else {
-        setMessages([
-          ...updatedMessages,
-          {
-            sender: "ai",
-            text: "Sorry, I encountered an error connecting to the backend analysis engine. Please ensure FastAPI is running.",
-          },
-        ]);
+      if (!response.ok || !response.body) {
+        throw new Error("Failed to initialize telemetry stream.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let accumulatedText = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        accumulatedText += chunk;
+
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { sender: "ai", text: accumulatedText };
+          return updated;
+        });
       }
     } catch (err) {
-      setMessages([
-        ...updatedMessages,
-        {
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
           sender: "ai",
-          text: "Unable to reach the server. Please check your connection or backend server status.",
-        },
-      ]);
+          text: "Unable to complete telemetry stream. Please ensure the backend engine is active.",
+        };
+        return updated;
+      });
     } finally {
       setIsLoading(false);
     }
@@ -297,7 +313,7 @@ export default function SeerCasualPage() {
               </div>
             ))}
 
-            {isLoading && (
+            {isLoading && !messages[messages.length - 1]?.text && (
               <div className="flex gap-4 justify-start">
                 <div className="w-8 h-8 rounded-full bg-emerald-950 border border-emerald-500/40 flex items-center justify-center text-emerald-400 text-xs font-black animate-spin">
                   ❖

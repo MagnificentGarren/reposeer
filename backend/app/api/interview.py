@@ -17,7 +17,6 @@ class QuestionGenerateRequest(BaseModel):
 class EvaluateResponseRequest(BaseModel):
     question: str
     candidate_answer: str
-    code_snippet: str | None = None
     difficulty: str = "Medium"
 
 
@@ -49,7 +48,8 @@ async def generate_interview_question(payload: QuestionGenerateRequest):
 
     prompt = (
         f"Generate a {payload.difficulty}-level interview question asking the candidate how they would refactor "
-        "or re-architect a specific flaw in this codebase. Include a realistic Python code snippet representing the problem."
+        "or re-architect a specific flaw in this codebase. End your response with a concise, realistic Python code "
+        "snippet representing the issue being discussed, introduced by the heading '### Referenced Code'."
     )
 
     try:
@@ -66,7 +66,6 @@ async def generate_interview_question(payload: QuestionGenerateRequest):
             "difficulty": payload.difficulty,
             "question": response.text or "How would you refactor the tightly coupled dependencies in this repository?",
             "target_flaw": key_flaws[0] if key_flaws else "Tight Coupling & High Complexity",
-            "snippet": "# Example module snippet\ndef process_data(data):\n    # TODO: Refactor monolithic function\n    pass",
         }
     except Exception as e:
         print(f"[Interview Gen Error]: {str(e)}")

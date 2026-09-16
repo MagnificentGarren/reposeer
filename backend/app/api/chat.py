@@ -1,19 +1,30 @@
 import os
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from google import genai
 from google.genai import types
-from app.models.schemas import SeerChatRequest, SeerChatResponse
+from app.models.schemas import SeerChatRequest
 
 router = APIRouter()
 
-gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+def get_gemini_client() -> genai.Client:
+    """Lazily initializes the Gemini client to ensure environment variables are loaded."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="GEMINI_API_KEY environment variable is missing on the server.",
+        )
+    return genai.Client(api_key=api_key)
 
 
-@router.post("/chat", response_model=SeerChatResponse)
+@router.post("/chat")
 async def seer_casual_chat(payload: SeerChatRequest):
     if not payload.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
+    gemini_client = get_gemini_client()
     context = payload.report_context or {}
 
     files_analyzed = context.get("files_analyzed", 0)
@@ -56,26 +67,24 @@ async def seer_casual_chat(payload: SeerChatRequest):
         "Answer the user's prompt using the context above."
     )
 
-    try:
-        response = gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=payload.query,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.3,
-            ),
-        )
+    def event_generator():
+        try:
+            response = gemini_client.models.generate_content_stream(
+                model="gemini-2.5-flash",
+                contents=payload.query,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.3,
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                        disable=True
+                    )
+                ),
+            )
+            for chunk in response:
+                if chunk.text:
+                    yield chunk.text
+        except Exception as e:
+            print(f"[Reposeer Chat Streaming Error]: {str(e)}")
+            yield "\n\nAn error occurred while streaming response telemetry."
 
-        raw_text = response.text or "I wasn't able to generate a response based on the current context."
-
-        # Post-process: Guarantee double newlines across all paragraphs & list breaks
-        formatted_text = "\n\n".join([line.strip() for line in raw_text.splitlines() if line.strip()])
-
-        return SeerChatResponse(response=formatted_text)
-
-    except Exception as e:
-        print(f"[Reposeer Chat Error]: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to process query with Gemini API: {str(e)}"
-        )
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

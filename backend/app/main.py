@@ -1,6 +1,16 @@
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Path calculation: app/main.py -> app (parent) -> backend (parent.parent) -> reposeer (parent.parent.parent)
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+ENV_PATH = REPO_ROOT / ".env"
+
+# Load .env explicitly from reposeer/.env
+load_dotenv(dotenv_path=ENV_PATH)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import inspect
 from app.api import chat, inspect, interview
 
 app = FastAPI(
@@ -18,7 +28,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount inspection routes under /api/inspect
+# Mount inspection routes
 app.include_router(inspect.router, prefix="/api/inspect", tags=["Inspection"])
 app.include_router(chat.router, prefix="/api/seer", tags=["Casual Chat"])
 app.include_router(interview.router, prefix="/api/interview", tags=["Interview"])
