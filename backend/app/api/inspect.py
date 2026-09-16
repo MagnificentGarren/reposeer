@@ -3,15 +3,14 @@
 import json
 import asyncio
 import uuid
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-# Import services & workflow state from your existing modules
+# Import services used by the structural inspection pipeline
 from app.services.ingestion import IngestionService
 from app.services.ast_parser import PythonASTParser
 from app.services.graph_mapper import DependencyGraphMapper
-from app.services.ai_engine import inspection_graph, WorkflowState
 
 router = APIRouter()
 
@@ -67,22 +66,8 @@ def run_analysis_task(job_id: str, repo_url: str):
         jobs[job_id] = {
             "status": "processing",
             "progress": 80,
-            "message": "Running AI Engine evaluation...",
+            "message": "Finalising structural analysis...",
         }
-        file_list_str = "\n".join([f["relative_path"] for f in python_files])
-
-        initial_state: WorkflowState = {
-            "ast_summary": {
-                "file_count": len(ast_data),
-                "modules": ast_data[:15],
-                "graph_metrics": graph_metrics,
-            },
-            "repo_structure": file_list_str,
-            "report": None,
-        }
-
-        final_state = inspection_graph.invoke(initial_state)
-        report = final_state.get("report")
 
         jobs[job_id] = {
             "status": "completed",
@@ -92,7 +77,6 @@ def run_analysis_task(job_id: str, repo_url: str):
                 "files_analyzed": len(python_files),
                 "ast_summary": ast_data,
                 "dependency_graph": graph_metrics,
-                "ai_report": report,
             },
         }
     except Exception as e:

@@ -23,9 +23,6 @@ class EvaluateResponseRequest(BaseModel):
 @router.post("/generate-question")
 async def generate_interview_question(payload: QuestionGenerateRequest):
     context = payload.report_context or {}
-    ai_report = context.get("ai_report") or {}
-    roast = ai_report.get("roast") or {}
-    key_flaws = roast.get("key_flaws", [])
     ast_summary = context.get("ast_summary") or []
 
     sample_code = ""
@@ -42,7 +39,6 @@ async def generate_interview_question(payload: QuestionGenerateRequest):
         "3. Focus on coupling, modularity, refactoring, and testability challenges.\n"
         f"4. Difficulty Level: {payload.difficulty}.\n\n"
         "REPOSITORY CONTEXT:\n"
-        f"- Flaws Identified: {', '.join(key_flaws) if key_flaws else 'High coupling and monolithic modules'}\n"
         f"- Sample Files: {sample_code or 'main.py, utils.py'}\n"
     )
 
@@ -65,7 +61,7 @@ async def generate_interview_question(payload: QuestionGenerateRequest):
         return {
             "difficulty": payload.difficulty,
             "question": response.text or "How would you refactor the tightly coupled dependencies in this repository?",
-            "target_flaw": key_flaws[0] if key_flaws else "Tight Coupling & High Complexity",
+            "target_flaw": "Repository structure and module boundaries",
         }
     except Exception as e:
         print(f"[Interview Gen Error]: {str(e)}")

@@ -8,6 +8,7 @@ export default function ModeSelectionPage() {
   const router = useRouter();
   const [selectedMode, setSelectedMode] = useState<"casual" | "interview">("casual");
   const [repoName, setRepoName] = useState<string>("Active Codebase");
+  const [showExitModal, setShowExitModal] = useState<boolean>(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -60,26 +61,30 @@ func data_struct() {
       </div>
 
       {/* Navigation Header */}
-      <header className="relative z-10 flex items-center justify-between px-10 py-5 border-b border-emerald-950/40 bg-[#030908]/80 backdrop-blur-md">
-        <div className="flex items-center gap-3">
+      <header className="relative z-10 flex items-center justify-between px-8 py-6 border-b border-emerald-950/40 bg-[#030908]/80 backdrop-blur-md">
+        {/* Brand Logo & Back Action */}
+        <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-2">
-            <span className="text-emerald-400 font-black text-xl tracking-wider">❖ REPOSEER</span>
+            <span className="text-emerald-400 font-black text-2xl tracking-wider">❖ REPOSEER</span>
           </Link>
+
+          <button
+            onClick={() => router.push("/seer/results")}
+            className="flex items-center gap-2 text-sm font-mono font-bold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/50 px-5 py-2.5 rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.15)] hover:scale-105"
+          >
+            <span>←</span> Back to Results
+          </button>
         </div>
 
-        <nav className="hidden md:flex items-center gap-8 text-sm text-slate-400 font-medium">
-          <Link href="/" className="hover:text-emerald-400 transition-colors">Home</Link>
-          <Link href="/about" className="hover:text-emerald-400 transition-colors">About Us</Link>
-          <Link href="/work" className="hover:text-emerald-400 transition-colors">Work</Link>
-          <Link href="/info" className="hover:text-emerald-400 transition-colors">Info</Link>
-        </nav>
-
-        <Link
-          href="/seer"
-          className="px-5 py-2.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-semibold text-xs rounded-full hover:bg-emerald-500/30 transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)]"
-        >
-          Consult the Orb (Free-ish)
-        </Link>
+        {/* Exit Action Button */}
+        <div>
+          <button
+            onClick={() => setShowExitModal(true)}
+            className="flex items-center gap-2 text-sm font-mono font-bold text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/40 px-5 py-2.5 rounded-xl transition-all shadow-[0_0_15px_rgba(244,63,94,0.15)] hover:scale-105"
+          >
+            <span>🚪</span> Exit to Home
+          </button>
+        </div>
       </header>
 
       {/* Main Mode Selection Workspace */}
@@ -111,6 +116,19 @@ func data_struct() {
                 : "bg-slate-950/40 border-slate-800/80 opacity-70 hover:opacity-100 hover:border-cyan-500/50 hover:bg-slate-900/40"
             }`}
           >
+            {/* Selection Indicator */}
+            <div className="absolute top-4 right-4">
+              <span
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border ${
+                  selectedMode === "casual"
+                    ? "bg-cyan-400 text-slate-950 border-cyan-300"
+                    : "border-slate-700 text-transparent"
+                }`}
+              >
+                ✓
+              </span>
+            </div>
+
             {/* Card Graphic Icon */}
             <div className="w-24 h-24 mb-6 flex items-center justify-center rounded-2xl bg-cyan-950/50 border border-cyan-500/30 text-cyan-400 group-hover:scale-105 transition-transform">
               <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -139,6 +157,19 @@ func data_struct() {
                 : "bg-slate-950/40 border-slate-800/80 opacity-70 hover:opacity-100 hover:border-orange-500/50 hover:bg-slate-900/40"
             }`}
           >
+            {/* Selection Indicator */}
+            <div className="absolute top-4 right-4">
+              <span
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border ${
+                  selectedMode === "interview"
+                    ? "bg-orange-400 text-slate-950 border-orange-300"
+                    : "border-slate-700 text-transparent"
+                }`}
+              >
+                ✓
+              </span>
+            </div>
+
             {/* Card Graphic Icon */}
             <div className="w-24 h-24 mb-6 flex items-center justify-center rounded-2xl bg-orange-950/50 border border-orange-500/30 text-orange-400 group-hover:scale-105 transition-transform">
               <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -166,6 +197,37 @@ func data_struct() {
           Confirm Selection
         </button>
       </main>
+
+      {/* EXIT CONFIRMATION MODAL */}
+      {showExitModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#030908] border border-rose-500/40 rounded-3xl p-8 max-w-md w-full shadow-[0_0_50px_rgba(244,63,94,0.2)] space-y-6">
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-slate-100">
+                Exit to Home Page?
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Returning home will leave your current repository inspection session.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={() => setShowExitModal(false)}
+                className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold rounded-xl text-xs transition-all border border-slate-700/50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => router.push("/")}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-xl text-xs transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)]"
+              >
+                Exit Session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

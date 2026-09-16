@@ -28,16 +28,8 @@ async def seer_casual_chat(payload: SeerChatRequest):
     context = payload.report_context or {}
 
     files_analyzed = context.get("files_analyzed", 0)
-    ai_report = context.get("ai_report") or {}
-
-    scores = ai_report.get("scores") or {}
-    maintainability = scores.get("maintainability", "N/A")
-    coupling_risk = scores.get("coupling_risk", "N/A")
-    testability = scores.get("testability", "N/A")
-
-    roast = ai_report.get("roast") or {}
-    summary_roast = roast.get("summary", "No roast summary available.")
-    key_flaws = roast.get("key_flaws", [])
+    graph_data = context.get("dependency_graph") or {}
+    scores = graph_data.get("scores") or {}
 
     ast_summary = context.get("ast_summary") or []
     sample_files: list[str] = [
@@ -58,11 +50,10 @@ async def seer_casual_chat(payload: SeerChatRequest):
         "4. Place blank space between introductory sentences, bullet points, and concluding points.\n\n"
         "CURRENT REPOSITORY CONTEXT:\n"
         f"- Total Files Parsed: {files_analyzed}\n"
-        f"- Maintainability Score: {maintainability}/100\n"
-        f"- Coupling Risk Score: {coupling_risk}/100\n"
-        f"- Testability Score: {testability}/100\n"
-        f"- Executive Overview: {summary_roast}\n"
-        f"- Key Architectural Flaws Identified: {', '.join(key_flaws) if key_flaws else 'None reported'}\n"
+        f"- Overall Architecture Score: {scores.get('overall', 'N/A')}/100\n"
+        f"- Maintainability: {scores.get('maintainability', 'N/A')}/100\n"
+        f"- Testability: {scores.get('testability', 'N/A')}/100\n"
+        f"- Coupling Risk: {scores.get('coupling_risk', 'N/A')}/100\n"
         f"- Sample High-Level Modules: {', '.join(sample_files) if sample_files else 'Not specified'}\n\n"
         "Answer the user's prompt using the context above."
     )

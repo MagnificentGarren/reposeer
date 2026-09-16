@@ -78,6 +78,30 @@ class DependencyGraphMapper:
             "total_edges": self.graph.number_of_edges(),
             "circular_dependencies": circular_dependencies,
             "coupling_scores": self._calculate_coupling(),
+            "scores": self._calculate_architecture_scores(parsed_files, circular_dependencies),
+        }
+
+    def _calculate_architecture_scores(
+        self, parsed_files: list[dict], circular_dependencies: list[list[str]]
+    ) -> dict[str, int]:
+        """Calculate transparent structural scores without an external AI call."""
+        file_count = max(len(parsed_files), 1)
+        average_imports = sum(len(file_info["imports"]) for file_info in parsed_files) / file_count
+        average_classes = sum(len(file_info["classes"]) for file_info in parsed_files) / file_count
+        average_functions = sum(len(file_info["functions"]) for file_info in parsed_files) / file_count
+
+        coupling_risk = min(
+            100,
+            round(average_imports * 12 + len(circular_dependencies) * 20),
+        )
+        maintainability = max(0, 100 - round(coupling_risk * 0.55) - round(average_classes * 4))
+        testability = max(0, 100 - round(average_classes * 3) - round(average_functions * 1.5))
+
+        return {
+            "overall": round((maintainability + (100 - coupling_risk) + testability) / 3),
+            "maintainability": maintainability,
+            "coupling_risk": coupling_risk,
+            "testability": testability,
         }
 
     def _resolve_import_to_path(self, import_stmt: str, known_paths: set[str]) -> str | None:

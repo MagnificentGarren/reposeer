@@ -2,12 +2,31 @@
 
 import { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 interface ChatMessage {
   sender: "user" | "ai";
   text: string;
+}
+
+interface RepositoryScores {
+  overall?: number;
+  maintainability?: number;
+  testability?: number;
+  coupling_risk?: number;
+}
+
+interface RepositoryReport {
+  result?: RepositoryReport;
+  files_analyzed?: number;
+  ast_summary?: unknown[];
+  dependency_graph?: {
+    total_nodes?: number;
+    scores?: RepositoryScores;
+  };
+  scores?: RepositoryScores;
 }
 
 const STORAGE_KEY_REPORT = "reposeer_latest_report";
@@ -18,23 +37,64 @@ const DEFAULT_WELCOME_MESSAGE: ChatMessage = {
   text: "Hello! I've processed your repository analysis. Ask me anything about its high-level architecture, business risks, maintainability, or modularity.",
 };
 
+/**
+ * Utility to calculate dynamic threshold colors for numerical scores:
+ * < 50      -> Red (High Risk / Low Score)
+ * 50 - 74   -> Amber/Yellow (Moderate)
+ * 75 - 89   -> Emerald/Green (Good)
+ * >= 90     -> Cyan/Blue (Excellent)
+ */
+function getScoreColorClass(score: number): string {
+  if (score < 50) return "text-rose-500 drop-shadow-[0_0_10px_rgba(244,63,94,0.4)]";
+  if (score < 75) return "text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.4)]";
+  if (score < 90) return "text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.4)]";
+  return "text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.4)]";
+}
+
+function normalizeMarkdown(text: string): string {
+  return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
+}
+
+function ScoreMetric({ label, value }: { label: string; value: number }) {
+  const colorClass = getScoreColorClass(value);
+  return (
+    <div className="flex flex-col items-center justify-center p-3 rounded-xl bg-[#030908]/60 border border-emerald-950/60">
+      <div className={`text-xl font-black leading-none ${colorClass}`}>
+        {value}
+      </div>
+      <div className="mt-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
+        {label}
+      </div>
+    </div>
+  );
+}
+
 export default function SeerCasualPage() {
-  const [report, setReport] = useState<any>(null);
+  const router = useRouter();
+  const [report, setReport] = useState<RepositoryReport | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([DEFAULT_WELCOME_MESSAGE]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Modals
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   // 1. Load Session Report & Persisted Chat History on Mount
   useEffect(() => {
+    let cancelled = false;
+
     if (typeof window !== "undefined") {
       const rawReport = sessionStorage.getItem(STORAGE_KEY_REPORT);
       if (rawReport) {
         try {
-          const parsedReport = JSON.parse(rawReport);
-          // Normalise report structure
+          const parsedReport = JSON.parse(rawReport) as RepositoryReport;
           const rootData = parsedReport.result || parsedReport;
-          setReport(rootData);
+          window.setTimeout(() => {
+            if (!cancelled) setReport(rootData);
+          }, 0);
         } catch (e) {
           console.error("Failed to parse stored report:", e);
         }
@@ -43,15 +103,21 @@ export default function SeerCasualPage() {
       const rawChat = sessionStorage.getItem(STORAGE_KEY_CHAT);
       if (rawChat) {
         try {
-          const parsedChat = JSON.parse(rawChat);
+          const parsedChat = JSON.parse(rawChat) as ChatMessage[];
           if (Array.isArray(parsedChat) && parsedChat.length > 0) {
-            setMessages(parsedChat);
+            window.setTimeout(() => {
+              if (!cancelled) setMessages(parsedChat);
+            }, 0);
           }
         } catch (e) {
           console.error("Failed to parse stored chat history:", e);
         }
       }
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 2. Persist Chat Messages whenever updated
@@ -67,21 +133,29 @@ export default function SeerCasualPage() {
   }, [messages, isLoading]);
 
   const metrics = useMemo(() => {
-    if (!report) return { score: 100, files: 0, modules: 0, status: "Optimal" };
+    if (!report) {
+      return {
+        files: 0,
+        modules: 0,
+        scores: { overall: 0, maintainability: 0, testability: 0, couplingRisk: 0 },
+      };
+    }
 
-    const aiReport = report.ai_report || {};
-    const scores = aiReport.scores || {};
-    
-    const score = scores.maintainability ?? report.health_score ?? 85;
     const files = report.files_analyzed || (report.ast_summary ? report.ast_summary.length : 0);
     const graphData = report.dependency_graph || {};
     const modules = graphData.total_nodes || (Array.isArray(report.ast_summary) ? report.ast_summary.length : files);
+    const scores = graphData.scores || report.scores || {};
 
-    let status = "Healthy";
-    if (score < 60) status = "Needs Attention";
-    else if (score < 80) status = "Moderate Risk";
-
-    return { score, files, modules, status };
+    return {
+      files,
+      modules,
+      scores: {
+        overall: scores.overall ?? 0,
+        maintainability: scores.maintainability ?? 0,
+        testability: scores.testability ?? 0,
+        couplingRisk: scores.coupling_risk ?? 0,
+      },
+    };
   }, [report]);
 
   const handleClearChat = () => {
@@ -89,6 +163,7 @@ export default function SeerCasualPage() {
     if (typeof window !== "undefined") {
       sessionStorage.removeItem(STORAGE_KEY_CHAT);
     }
+    setShowResetModal(false);
   };
 
   const handleSendMessage = async (queryText?: string, e?: React.FormEvent) => {
@@ -101,7 +176,7 @@ export default function SeerCasualPage() {
     const newMessages: ChatMessage[] = [
       ...messages,
       { sender: "user", text: userQuery },
-      { sender: "ai", text: "" } // Placeholder for streaming text
+      { sender: "ai", text: "" }
     ];
     
     setMessages(newMessages);
@@ -124,22 +199,21 @@ export default function SeerCasualPage() {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
-      let accumulatedText = "";
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        accumulatedText += chunk;
 
         setMessages((prev) => {
           const updated = [...prev];
-          updated[updated.length - 1] = { sender: "ai", text: accumulatedText };
+          const previousText = updated[updated.length - 1]?.text || "";
+          updated[updated.length - 1] = { sender: "ai", text: previousText + chunk };
           return updated;
         });
       }
-    } catch (err) {
+    } catch {
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = {
@@ -172,6 +246,8 @@ export default function SeerCasualPage() {
     );
   }
 
+  const overallColorClass = getScoreColorClass(metrics.scores.overall);
+
   return (
     <div className="h-screen bg-[#030908] text-slate-100 flex flex-col font-sans overflow-hidden">
       {/* GLOBAL TOP NAVIGATION */}
@@ -184,25 +260,26 @@ export default function SeerCasualPage() {
           <span className="text-xs uppercase tracking-widest text-emerald-500 font-bold">Casual Dashboard</span>
         </div>
 
-        <div className="flex items-center gap-4">
+        {/* Action Controls */}
+        <div className="flex items-center gap-3">
+          <Link
+            href="/seer/interview"
+            className="px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold rounded-xl transition-all shadow-[0_0_10px_rgba(245,158,11,0.1)]"
+          >
+            Switch to Interview Mode
+          </Link>
           <button
-            onClick={handleClearChat}
-            className="px-3 py-1.5 text-xs text-slate-400 hover:text-red-400 border border-slate-800 hover:border-red-900/50 rounded-lg transition-all"
+            onClick={() => setShowResetModal(true)}
+            className="px-4 py-2 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/60 text-slate-300 hover:text-rose-300 text-xs font-bold rounded-xl transition-all"
           >
             Reset Chat
           </button>
-          <Link
-            href="/seer/results"
-            className="px-4 py-2 bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 text-xs font-bold rounded-xl hover:bg-emerald-900/50 transition-all"
+          <button
+            onClick={() => setShowExitModal(true)}
+            className="px-4 py-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/40 text-rose-300 text-xs font-bold rounded-xl transition-all shadow-[0_0_10px_rgba(244,63,94,0.15)]"
           >
-            Technical View
-          </Link>
-          <Link
-            href="/seer/mode"
-            className="px-4 py-2 bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 text-xs font-bold rounded-xl hover:bg-emerald-500/30 transition-all"
-          >
-            Switch Mode
-          </Link>
+            Exit
+          </button>
         </div>
       </header>
 
@@ -210,14 +287,25 @@ export default function SeerCasualPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT SIDEBAR */}
         <aside className="w-80 border-r border-emerald-950/60 bg-[#020706] p-6 flex flex-col gap-6 overflow-y-auto hidden lg:flex">
-          <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-5 relative overflow-hidden">
-            <div className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Maintainability</div>
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-5xl font-black text-emerald-400">{metrics.score}</span>
-              <span className="text-slate-400 text-sm font-bold">/ 100</span>
+          {/* OVERHAULED SCORE CARD */}
+          <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-5 space-y-5">
+            <div className="text-center space-y-2">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+                Overall Architecture
+              </span>
+              <div className="flex items-baseline justify-center gap-2 pt-1">
+                <span className={`text-6xl font-black leading-none ${overallColorClass}`}>
+                  {metrics.scores.overall}
+                </span>
+                <span className="text-slate-500 text-base font-bold">/ 100</span>
+              </div>
             </div>
-            <div className="mt-3 inline-block px-2.5 py-0.5 rounded-md bg-emerald-950 border border-emerald-500/40 text-[11px] font-bold text-emerald-300">
-              {metrics.status}
+
+            {/* Sub Metric Grid with Improved Spacing & Formatting */}
+            <div className="grid grid-cols-1 gap-2.5 border-t border-emerald-500/20 pt-4">
+              <ScoreMetric label="Maintainability" value={metrics.scores.maintainability} />
+              <ScoreMetric label="Testability" value={metrics.scores.testability} />
+              <ScoreMetric label="Coupling Risk" value={metrics.scores.couplingRisk} />
             </div>
           </div>
 
@@ -247,7 +335,7 @@ export default function SeerCasualPage() {
                   disabled={isLoading}
                   className="w-full text-left p-3 rounded-xl bg-emerald-950/10 hover:bg-emerald-950/40 border border-emerald-500/20 text-xs text-slate-300 transition-all disabled:opacity-50"
                 >
-                  "{q}"
+                  &quot;{q}&quot;
                 </button>
               ))}
             </div>
@@ -301,12 +389,41 @@ export default function SeerCasualPage() {
                         li: ({ children }) => (
                           <li className="leading-relaxed">{children}</li>
                         ),
+                        h1: ({ children }) => (
+                          <h1 className="mb-3 mt-5 text-lg font-bold text-emerald-300 first:mt-0">{children}</h1>
+                        ),
+                        h2: ({ children }) => (
+                          <h2 className="mb-2 mt-5 text-base font-bold text-emerald-300 first:mt-0">{children}</h2>
+                        ),
+                        h3: ({ children }) => (
+                          <h3 className="mb-2 mt-4 text-sm font-bold text-emerald-400 first:mt-0">{children}</h3>
+                        ),
                         strong: ({ children }) => (
                           <strong className="font-bold text-emerald-400">{children}</strong>
                         ),
+                        code: ({ children, className }) => (
+                          <code className={`${className || ""} rounded bg-emerald-950/70 px-1.5 py-0.5 font-mono text-[0.9em] text-emerald-200`}>
+                            {children}
+                          </code>
+                        ),
+                        pre: ({ children }) => (
+                          <pre className="my-4 overflow-x-auto rounded-xl border border-emerald-500/20 bg-[#020706] p-4 text-xs leading-relaxed text-slate-300">
+                            {children}
+                          </pre>
+                        ),
+                        blockquote: ({ children }) => (
+                          <blockquote className="my-4 border-l-2 border-emerald-500/60 pl-4 italic text-slate-400">
+                            {children}
+                          </blockquote>
+                        ),
+                        a: ({ children, href }) => (
+                          <a href={href} className="text-emerald-300 underline decoration-emerald-500/50 underline-offset-2 hover:text-emerald-200">
+                            {children}
+                          </a>
+                        ),
                       }}
                     >
-                      {msg.text}
+                      {normalizeMarkdown(msg.text)}
                     </ReactMarkdown>
                   )}
                 </div>
@@ -351,6 +468,68 @@ export default function SeerCasualPage() {
           </div>
         </main>
       </div>
+
+      {/* RESET CHAT CONFIRMATION MODAL */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#030908] border border-emerald-500/40 rounded-3xl p-8 max-w-md w-full shadow-[0_0_50px_rgba(16,185,129,0.2)] space-y-6">
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-slate-100">
+                Reset Conversation?
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                This action will clear your current casual chat session history for this repository analysis.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={() => setShowResetModal(false)}
+                className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold rounded-xl text-xs transition-all border border-slate-700/50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearChat}
+                className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)]"
+              >
+                Confirm Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXIT CONFIRMATION MODAL */}
+      {showExitModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#030908] border border-rose-500/40 rounded-3xl p-8 max-w-md w-full shadow-[0_0_50px_rgba(244,63,94,0.2)] space-y-6">
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-slate-100">
+                Exit to Home Page?
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Returning to the home page will end your active session dashboard.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={() => setShowExitModal(false)}
+                className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold rounded-xl text-xs transition-all border border-slate-700/50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => router.push("/")}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-xl text-xs transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)]"
+              >
+                Exit Session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
