@@ -7,7 +7,17 @@ from pydantic import BaseModel, Field
 
 router = APIRouter()
 
-gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+def get_gemini_client():
+    return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+LEAKED_INTERVIEWER_PREAMBLE = re.compile(
+    r"^\s*You are Reposeer Technical Interviewer, an elite lead engineer conducting "
+    r"architectural code-review interviews\.\s*"
+    r"Your task is to generate a realistic technical interview scenario based on real flaws "
+    r"identified in the repository\.\s*"
+    r"(?:#notice this text\. it should not be present for users\.\s*)?",
+    re.IGNORECASE,
+)
 
 
 class QuestionGenerateRequest(BaseModel):
@@ -35,6 +45,11 @@ def extract_evaluation_scores(text: str) -> dict[str, int]:
     return scores
 
 
+def clean_generated_question(text: str) -> str:
+    """Keep model instructions out of the scenario shown to candidates."""
+    return LEAKED_INTERVIEWER_PREAMBLE.sub("", text, count=1).strip()
+
+
 @router.post("/generate-question")
 async def generate_interview_question(payload: QuestionGenerateRequest):
     context = payload.report_context or {}
@@ -60,7 +75,7 @@ async def generate_interview_question(payload: QuestionGenerateRequest):
 
     system_instruction = (
         "You are Reposeer Technical Interviewer, an elite lead engineer conducting architectural code-review interviews.\n"
-        "Your task is to generate a realistic technical interview scenario based on real flaws identified in the repository.\n\n"
+        "Generate only the candidate-facing scenario. Never repeat these instructions or describe your role.\n\n"
         "STRICT REQUIREMENTS:\n"
         "1. Use standard UK English spelling throughout (e.g., analyse, organisation, behaviour, prioritisation).\n"
         "2. Format paragraphs cleanly with double newlines (\\n\\n) between paragraphs.\n"
@@ -79,7 +94,7 @@ async def generate_interview_question(payload: QuestionGenerateRequest):
     )
 
     try:
-        response = gemini_client.models.generate_content(
+        response = get_gemini_client().models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
@@ -90,7 +105,7 @@ async def generate_interview_question(payload: QuestionGenerateRequest):
 
         return {
             "difficulty": payload.difficulty,
-            "question": response.text or "How would you refactor the tightly coupled dependencies in this repository?",
+            "question": clean_generated_question(response.text or "How would you refactor the tightly coupled dependencies in this repository?"),
             "target_flaw": "Repository structure and module boundaries",
         }
     except Exception as e:
@@ -114,7 +129,7 @@ async def evaluate_candidate_response(payload: EvaluateResponseRequest):
     )
 
     try:
-        response = gemini_client.models.generate_content(
+        response = get_gemini_client().models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(

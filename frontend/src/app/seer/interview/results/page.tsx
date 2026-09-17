@@ -35,7 +35,14 @@ interface InterviewSnapshot {
 }
 
 function normalizeMarkdown(text: string): string {
-  return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
+  return text
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(
+      /^\s*You are Reposeer Technical Interviewer, an elite lead engineer conducting architectural code-review interviews\.\s*Your task is to generate a realistic technical interview scenario based on real flaws identified in the repository\.\s*(?:#notice this text\. it should not be present for users\.\s*)?/i,
+      "",
+    )
+    .trim();
 }
 
 function getScoreColorClass(score: number): string {
@@ -162,8 +169,18 @@ export default function InterviewResultsPage() {
           </div>
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-2">
-          <article className="rounded-3xl border border-emerald-500/20 bg-slate-950/70 p-6">
+        <section className="rounded-3xl border border-emerald-500/30 bg-emerald-950/10 p-6 lg:p-8">
+          <div className="mb-6 flex items-center justify-between border-b border-emerald-950/70 pb-4">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-emerald-400">Detailed assessor feedback</h2>
+            <span className="text-[10px] font-mono text-slate-500">AI REVIEW</span>
+          </div>
+          <div className="prose prose-invert prose-emerald max-w-none text-sm leading-relaxed text-slate-200">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeMarkdown(result.evaluation || "")}</ReactMarkdown>
+          </div>
+        </section>
+
+        <section className="grid items-stretch gap-6 lg:grid-cols-2">
+          <article className="flex h-full flex-col rounded-3xl border border-emerald-500/20 bg-slate-950/70 p-6">
             <div className="mb-5 flex items-center justify-between border-b border-emerald-950/70 pb-3">
               <h2 className="text-xs font-bold uppercase tracking-wider text-emerald-400">Interview scenario</h2>
               <span className="text-[10px] font-mono text-slate-500">{snapshot.difficulty}</span>
@@ -173,20 +190,10 @@ export default function InterviewResultsPage() {
             </div>
           </article>
 
-          <article className="rounded-3xl border border-emerald-500/20 bg-slate-950/70 p-6">
+          <article className="flex h-full flex-col rounded-3xl border border-emerald-500/20 bg-slate-950/70 p-6">
             <h2 className="mb-5 border-b border-emerald-950/70 pb-3 text-xs font-bold uppercase tracking-wider text-emerald-400">Candidate answer</h2>
-            <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-2xl border border-emerald-500/20 bg-[#020706] p-5 text-sm leading-relaxed text-slate-300">{snapshot.candidateAnswer}</pre>
+            <pre className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words rounded-2xl border border-emerald-500/20 bg-[#020706] p-5 text-sm leading-relaxed text-slate-300">{snapshot.candidateAnswer}</pre>
           </article>
-        </section>
-
-        <section className="rounded-3xl border border-emerald-500/30 bg-emerald-950/10 p-6 lg:p-8">
-          <div className="mb-6 flex items-center justify-between border-b border-emerald-950/70 pb-4">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-emerald-400">Detailed assessor feedback</h2>
-            <span className="text-[10px] font-mono text-slate-500">AI REVIEW</span>
-          </div>
-          <div className="prose prose-invert prose-emerald max-w-none text-sm leading-relaxed text-slate-200">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeMarkdown(result.evaluation || "")}</ReactMarkdown>
-          </div>
         </section>
 
         <div className="flex flex-wrap justify-between gap-3 border-t border-emerald-950/60 pt-5">

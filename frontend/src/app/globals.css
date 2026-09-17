@@ -132,3 +132,84 @@
     font-family: var(--font-fredoka), system-ui, -apple-system, sans-serif;
   }
 }
+
+@keyframes orb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes orb-spin-reverse {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@keyframes orb-pulse {
+  0%,
+  100% {
+    transform: scale(0.96);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 0.8;
+  }
+}
+
+.orb-loader__ring,
+.orb-loader__energy {
+  will-change: transform;
+}
+
+.orb-loader__ring--outer {
+  animation: orb-spin 18s linear infinite;
+  border-style: dashed;
+}
+
+.orb-loader__ring--middle {
+  animation: orb-spin-reverse 11s linear infinite;
+  transform: rotate(35deg) skewY(-12deg);
+}
+
+.orb-loader__ring--inner {
+  animation: orb-spin 7s linear infinite;
+  transform: rotate(-28deg) skewY(18deg);
+}
+
+.orb-loader__halo {
+  animation: orb-pulse 3.5s ease-in-out infinite;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.28) 0%, rgba(6, 182, 212, 0.12) 42%, transparent 72%);
+  filter: blur(12px);
+  will-change: transform, opacity;
+}
+
+.orb-loader__surface {
+  animation: orb-pulse 2.8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.orb-loader__energy--one {
+  animation: orb-spin 5s linear infinite;
+  left: 50%;
+  top: calc(50% - 144px);
+  transform: translateX(-50%);
+  transform-origin: 50% calc(50% + 144px);
+}
+
+.orb-loader__energy--two {
+  animation: orb-spin-reverse 8s linear infinite;
+  left: 50%;
+  top: calc(50% - 126px);
+  transform: translateX(-50%);
+  transform-origin: 50% calc(50% + 126px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb-loader__ring,
+  .orb-loader__energy,
+  .orb-loader__halo,
+  .orb-loader__surface {
+    animation-play-state: paused;
+  }
+}

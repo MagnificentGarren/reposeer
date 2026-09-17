@@ -48,7 +48,14 @@ function getScoreColorClass(score: number): string {
 }
 
 function normalizeMarkdown(text: string): string {
-  return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
+  return text
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(
+      /^\s*You are Reposeer Technical Interviewer, an elite lead engineer conducting architectural code-review interviews\.\s*Your task is to generate a realistic technical interview scenario based on real flaws identified in the repository\.\s*(?:#notice this text\. it should not be present for users\.\s*)?/i,
+      "",
+    )
+    .trim();
 }
 
 export default function SeerInterviewPage() {
