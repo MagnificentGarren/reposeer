@@ -1,48 +1,119 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  RotateCcw,
+  LogOut,
+  Sparkles,
+  Award,
+} from "lucide-react";
+import {
+  clearReposeerSession,
   readReposeerSession,
   writeReposeerSession,
 } from "@/lib/session";
 
 type Difficulty = "Easy" | "Medium" | "Hard";
 
+interface QuestionData {
+  question: string;
+  target_flaw: string;
+}
+
+interface EvaluationScores {
+  overall?: number;
+  architecture?: number;
+  clarity?: number;
+  modularity?: number;
+}
+
+interface EvaluationResult {
+  scores?: EvaluationScores;
+  evaluation?: string;
+}
+
+function getScoreColorClass(score: number): string {
+  if (score < 50) return "text-rose-500 drop-shadow-[0_0_10px_rgba(244,63,94,0.4)]";
+  if (score < 75) return "text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.4)]";
+  if (score < 90) return "text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.4)]";
+  return "text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.4)]";
+}
+
+function normalizeMarkdown(text: string): string {
+  return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
+}
+
 export default function SeerInterviewPage() {
-  const [report, setReport] = useState<any>(null);
+  const router = useRouter();
+  const [report, setReport] = useState<unknown>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("Easy");
-  const [questionData, setQuestionData] = useState<{
-    question: string;
-    target_flaw: string;
-  } | null>(null);
+  const [questionData, setQuestionData] = useState<QuestionData | null>(null);
 
   const [candidateAnswer, setCandidateAnswer] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
-  const [evaluationResult, setEvaluationResult] = useState<any>(null);
+  const [evaluationResult, setEvaluationResult] = useState<EvaluationResult | null>(null);
 
-  // Fetch AI Question drill
-  const fetchQuestion = async (selectedDiff: Difficulty, currentReport: any) => {
+  const [showQuestionPanel, setShowQuestionPanel] = useState(true);
+  const [showAnswerPanel, setShowAnswerPanel] = useState(true);
+  const [questionPanelWidth, setQuestionPanelWidth] = useState(45);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const workspace = workspaceRef.current;
+      if (!workspace) return;
+
+      const bounds = workspace.getBoundingClientRect();
+      const nextWidth = ((event.clientX - bounds.left) / bounds.width) * 100;
+      setQuestionPanelWidth(Math.min(75, Math.max(25, nextWidth)));
+    };
+
+    const stopResizing = () => setIsResizing(false);
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResizing);
+    window.addEventListener("pointercancel", stopResizing);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResizing);
+      window.removeEventListener("pointercancel", stopResizing);
+    };
+  }, [isResizing]);
+
+  const fetchQuestion = async (selectedDiff: Difficulty, currentReport: unknown) => {
     setIsGenerating(true);
     setEvaluationResult(null);
+    setCandidateAnswer("");
     try {
       const res = await fetch("http://127.0.0.1:8000/api/interview/generate-question", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            difficulty: selectedDiff,
-            report_context: currentReport || {},
+          difficulty: selectedDiff,
+          report_context: currentReport || {},
         }),
-    });
+      });
 
       if (res.ok) {
-        const data = await res.json();
+        const data: QuestionData = await res.json();
         setQuestionData(data);
-      } else {
-        console.error("Backend error:", res.statusText);
       }
     } catch (err) {
       console.error("Error fetching question:", err);
@@ -51,23 +122,28 @@ export default function SeerInterviewPage() {
     }
   };
 
-  // Load session report & trigger initial fetch immediately
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window === "undefined") return;
+
+    const loadSession = window.setTimeout(() => {
       const storedSession = readReposeerSession();
       if (storedSession?.report) {
         setReport(storedSession.report);
         const storedInterview = storedSession.interview;
-        setDifficulty(storedInterview.difficulty);
-        setQuestionData(storedInterview.questionData);
-        setCandidateAnswer(storedInterview.candidateAnswer);
-        setEvaluationResult(storedInterview.evaluationResult);
+        if (storedInterview) {
+          setDifficulty(storedInterview.difficulty || "Easy");
+          setQuestionData(storedInterview.questionData || null);
+          setCandidateAnswer(storedInterview.candidateAnswer || "");
+          setEvaluationResult(storedInterview.evaluationResult || null);
+        }
 
-        if (!storedInterview.questionData) {
-          fetchQuestion(storedInterview.difficulty, storedSession.report);
+        if (!storedInterview?.questionData) {
+          fetchQuestion(storedInterview?.difficulty || "Easy", storedSession.report);
         }
       }
-    }
+    }, 0);
+
+    return () => window.clearTimeout(loadSession);
   }, []);
 
   useEffect(() => {
@@ -88,8 +164,16 @@ export default function SeerInterviewPage() {
   }, [report, difficulty, questionData, candidateAnswer, evaluationResult]);
 
   const handleDifficultyChange = (diff: Difficulty) => {
+    if (isGenerating || isEvaluating) return;
     setDifficulty(diff);
     fetchQuestion(diff, report);
+  };
+
+  const handleResetDrill = () => {
+    setCandidateAnswer("");
+    setEvaluationResult(null);
+    fetchQuestion(difficulty, report);
+    setShowResetModal(false);
   };
 
   const handleSubmitAnswer = async () => {
@@ -101,15 +185,28 @@ export default function SeerInterviewPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            question: questionData.question,
-            candidate_answer: candidateAnswer,
-            difficulty,
+          question: questionData.question,
+          candidate_answer: candidateAnswer,
+          difficulty,
         }),
-    });
+      });
 
       if (res.ok) {
-        const data = await res.json();
+        const data: EvaluationResult = await res.json();
         setEvaluationResult(data);
+        const storedSession = readReposeerSession();
+        if (storedSession) {
+          writeReposeerSession({
+            ...storedSession,
+            interview: {
+              difficulty,
+              questionData,
+              candidateAnswer,
+              evaluationResult: data,
+            },
+          });
+        }
+        router.push("/seer/interview/results");
       }
     } catch (err) {
       console.error("Error evaluating answer:", err);
@@ -117,6 +214,17 @@ export default function SeerInterviewPage() {
       setIsEvaluating(false);
     }
   };
+
+  const evaluationScores = evaluationResult?.scores;
+  const overallEvaluationScore = evaluationScores
+    ? evaluationScores.overall ??
+      Math.round(
+        ((evaluationScores.architecture ?? 0) +
+          (evaluationScores.clarity ?? 0) +
+          (evaluationScores.modularity ?? 0)) /
+          3,
+      )
+    : null;
 
   if (!report) {
     return (
@@ -140,144 +248,327 @@ export default function SeerInterviewPage() {
   return (
     <div className="h-screen bg-[#030908] text-slate-100 flex flex-col font-sans overflow-hidden">
       {/* HEADER */}
-      <header className="flex-none z-30 flex items-center justify-between px-8 py-4 border-b border-emerald-950/40 bg-[#030908]/90 backdrop-blur-md">
-        <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="text-emerald-400 font-black text-xl tracking-wider">❖ REPOSEER</span>
-          </Link>
-          <div className="h-5 w-[1px] bg-emerald-950/80 hidden md:block" />
-          <span className="text-xs uppercase tracking-widest text-emerald-500 font-bold">
-            Interview Simulation Mode
-          </span>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <Link
-            href="/seer/casual"
-            className="px-4 py-2 bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 text-xs font-bold rounded-xl hover:bg-emerald-900/50 transition-all"
-          >
-            Casual Dashboard
-          </Link>
-          <Link
-            href="/seer/mode"
-            className="px-4 py-2 bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 text-xs font-bold rounded-xl hover:bg-emerald-500/30 transition-all"
-          >
-            Switch Mode
-          </Link>
-        </div>
+      <header className="flex-none z-30 flex items-center justify-between px-6 py-3.5 border-b border-emerald-950/60 bg-[#030908]/90 backdrop-blur-md">
+        <Link href="/" className="flex items-center gap-2">
+          <span className="text-emerald-400 font-black text-xl tracking-wider">❖ REPOSEER</span>
+        </Link>
+        <span className="text-xs uppercase tracking-widest text-emerald-500 font-bold">
+          Interview Simulation Mode
+        </span>
       </header>
 
-      {/* INTERVIEW WORKSPACE */}
-      <div className="flex-1 grid grid-cols-12 overflow-hidden">
-        {/* LEFT PANEL: SESSION CONSOLE & QUESTION CONTEXT */}
-        <aside className="col-span-3 border-r border-emerald-950/60 bg-[#020706] p-6 flex flex-col gap-6 overflow-y-auto">
-          <div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
-              Difficulty Selector
-            </h3>
-            <div className="flex gap-2 bg-slate-950 p-1.5 rounded-xl border border-emerald-950">
-              {(["Easy", "Medium", "Hard"] as Difficulty[]).map((d) => (
-                <button
-                  key={d}
-                  onClick={() => handleDifficultyChange(d)}
-                  className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    difficulty === d
-                      ? "bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.3)]"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  {d}
-                </button>
-              ))}
+      {/* 3-COLUMN WORKSPACE */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* COLUMN 1: LEFT CONTROL UTILITY SIDEBAR */}
+        <aside className="w-52 flex-none border-r border-emerald-950/60 bg-[#020706] p-4 flex flex-col justify-between overflow-y-auto">
+          <div className="space-y-6">
+            <div className="px-3 py-2 bg-emerald-950/40 border border-emerald-500/20 rounded-xl text-center">
+              <span className="text-[10px] uppercase tracking-widest text-emerald-400 font-bold block">
+                Interview Mode
+              </span>
             </div>
+
+            {/* Difficulty Settings */}
+            <div className="space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block px-1">
+                Difficulty Settings
+              </span>
+              <div className="flex flex-col gap-1.5 bg-slate-950/80 p-1.5 rounded-xl border border-emerald-950">
+                {(["Easy", "Medium", "Hard"] as Difficulty[]).map((d) => (
+                  <button
+                    key={d}
+                    disabled={isGenerating || isEvaluating}
+                    onClick={() => handleDifficultyChange(d)}
+                    className={`w-full py-2 text-xs font-bold rounded-lg transition-all disabled:opacity-50 ${
+                      difficulty === d
+                        ? "bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.3)]"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Compact Score Badge Anchor */}
+            <div className="space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block px-1">
+                Assessment Score
+              </span>
+              {overallEvaluationScore !== null ? (
+                <Link
+                  href="/seer/interview/results"
+                  className="w-full bg-emerald-950/30 hover:bg-emerald-950/60 border border-emerald-500/30 rounded-xl p-3 flex items-center justify-between transition-all group"
+                >
+                  <div className="flex items-center gap-2">
+                    <Award size={16} className="text-emerald-400" />
+                    <span className="text-xs font-bold text-slate-300">Overall</span>
+                  </div>
+                  <span className={`text-base font-black ${getScoreColorClass(overallEvaluationScore)}`}>
+                    {overallEvaluationScore}/100
+                  </span>
+                </Link>
+              ) : (
+                <Link
+                  href="/seer/interview/results"
+                  className="block rounded-xl border border-slate-900 bg-slate-950/60 p-3 text-center transition-colors hover:border-emerald-500/30 hover:bg-emerald-950/20"
+                >
+                  <span className="block text-[11px] font-mono text-slate-500">Pending Submission</span>
+                  <span className="mt-2 block text-[10px] font-bold uppercase tracking-wider text-emerald-500/70">
+                    Open assessment dashboard
+                  </span>
+                </Link>
+              )}
+            </div>
+
+            {/* Casual Mode Switch */}
+            <Link
+              href="/seer/casual"
+              className="flex items-center gap-2 w-full px-3 py-2.5 bg-emerald-950/20 hover:bg-emerald-950/50 border border-emerald-500/20 text-emerald-300 text-xs font-bold rounded-xl transition-all"
+            >
+              <Sparkles size={14} />
+              <span>Casual Mode</span>
+            </Link>
           </div>
 
-          <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-5 space-y-3 flex-1 overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">
-                Active Scenario Context
-              </span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30">
-                {difficulty}
-              </span>
-            </div>
-
-            {isGenerating ? (
-              <div className="py-8 text-center text-xs text-slate-400 animate-pulse">
-                Generating tailored drill based on AST flaws...
-              </div>
-            ) : questionData ? (
-              <div className="space-y-4">
-                <div className="text-xs font-mono text-emerald-300 bg-emerald-950/50 p-2 rounded-lg border border-emerald-500/20">
-                  Target Flaw: {questionData.target_flaw}
-                </div>
-                <div className="prose prose-invert prose-emerald text-xs text-slate-300 leading-relaxed">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {questionData.question}
-                  </ReactMarkdown>
-                </div>
-              </div>
-            ) : null}
+          {/* Reset & Exit Actions */}
+          <div className="space-y-2 pt-4 border-t border-emerald-950/60">
+            <button
+              onClick={() => setShowResetModal(true)}
+              className="flex items-center justify-center gap-2 w-full py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700/60 text-slate-300 hover:text-rose-300 text-xs font-bold rounded-xl transition-all"
+            >
+              <RotateCcw size={13} />
+              <span>Reset Drill</span>
+            </button>
+            <button
+              onClick={() => setShowExitModal(true)}
+              className="flex items-center justify-center gap-2 w-full py-2 bg-rose-950/30 hover:bg-rose-900/50 border border-rose-500/30 text-rose-300 text-xs font-bold rounded-xl transition-all"
+            >
+              <LogOut size={13} />
+              <span>Exit</span>
+            </button>
           </div>
         </aside>
 
-        {/* RIGHT PANEL: CANDIDATE RESPONSE & ANALYTICS */}
-        <section className="col-span-9 bg-[#020706] p-6 flex flex-col gap-6 overflow-y-auto">
-          <div className="flex-1 flex flex-col gap-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Candidate Refactoring / Architectural Pitch
-            </h3>
-            <textarea
-              value={candidateAnswer}
-              onChange={(e) => setCandidateAnswer(e.target.value)}
-              placeholder="Detail your technical solution, modular refactoring strategy, or pattern implementations in standard UK English..."
-              className="flex-1 w-full bg-slate-950/90 border border-emerald-500/30 rounded-2xl p-4 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-400 transition-all resize-none font-mono leading-relaxed"
-            />
+        {/* WORKSPACE AREA (SCENARIO + ANSWER) */}
+        <div ref={workspaceRef} className={`relative flex flex-1 overflow-hidden ${isResizing ? "select-none" : ""}`}>
+          {!showQuestionPanel && (
             <button
-              onClick={handleSubmitAnswer}
-              disabled={isEvaluating || !candidateAnswer.trim()}
-              className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] flex items-center justify-center gap-2"
+              type="button"
+              onClick={() => setShowQuestionPanel(true)}
+              title="Show scenario panel"
+              aria-label="Show scenario panel"
+              className="absolute left-0 top-1/2 z-20 inline-flex -translate-y-1/2 items-center rounded-r-lg border border-l-0 border-emerald-500/30 bg-[#020706]/95 p-2 text-emerald-300 shadow-lg transition-colors hover:bg-emerald-950/80"
             >
-              {isEvaluating ? "Evaluating Solution..." : "Submit Answer for Assessment →"}
+              <PanelLeftOpen size={14} />
             </button>
-          </div>
-
-          {/* REAL-TIME PERFORMANCE EVALUATION FEEDBACK */}
-          {evaluationResult && (
-            <div className="bg-slate-950 border border-emerald-500/40 rounded-2xl p-5 space-y-4">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                Architectural Evaluation Results
-              </h4>
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div className="bg-emerald-950/30 p-3 rounded-xl border border-emerald-500/20">
-                  <div className="text-lg font-black text-emerald-400">
-                    {evaluationResult.scores?.architecture || 80}/100
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-medium mt-1">Architecture</div>
-                </div>
-                <div className="bg-emerald-950/30 p-3 rounded-xl border border-emerald-500/20">
-                  <div className="text-lg font-black text-emerald-400">
-                    {evaluationResult.scores?.clarity || 85}/100
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-medium mt-1">Clarity</div>
-                </div>
-                <div className="bg-emerald-950/30 p-3 rounded-xl border border-emerald-500/20">
-                  <div className="text-lg font-black text-emerald-400">
-                    {evaluationResult.scores?.modularity || 78}/100
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-medium mt-1">Modularity</div>
-                </div>
-              </div>
-
-              <div className="text-xs text-slate-300 leading-relaxed bg-emerald-950/10 p-4 rounded-xl border border-emerald-500/20">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {evaluationResult.evaluation}
-                </ReactMarkdown>
-              </div>
-            </div>
           )}
-        </section>
+
+          {!showAnswerPanel && (
+            <button
+              type="button"
+              onClick={() => setShowAnswerPanel(true)}
+              title="Show answer panel"
+              aria-label="Show answer panel"
+              className="absolute right-0 top-1/2 z-20 inline-flex -translate-y-1/2 items-center rounded-l-lg border border-r-0 border-emerald-500/30 bg-[#030908]/95 p-2 text-emerald-300 shadow-lg transition-colors hover:bg-emerald-950/80"
+            >
+              <PanelRightOpen size={14} />
+            </button>
+          )}
+
+          {/* COLUMN 2: CENTER SCENARIO PANEL */}
+          {showQuestionPanel && (
+            <section
+              style={{ "--panel-width": `${questionPanelWidth}%` } as React.CSSProperties}
+              className="w-full shrink-0 border-r border-emerald-950/60 bg-[#020706] flex flex-col overflow-hidden lg:w-[var(--panel-width)]"
+            >
+              <div className="flex items-center justify-between p-4 border-b border-emerald-950/60">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Scenario
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowQuestionPanel(false)}
+                  title="Hide scenario panel"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-950/30 px-2 py-1 text-[10px] font-bold text-emerald-300 hover:bg-emerald-950/70"
+                >
+                  <PanelLeftClose size={13} />
+                </button>
+              </div>
+
+              {/* Scrollable Scenario Content */}
+              <div className="flex-1 p-6 overflow-y-auto space-y-4">
+                {isGenerating ? (
+                  <div className="py-20 text-center text-xs text-slate-400 animate-pulse flex flex-col items-center gap-3">
+                    <div className="w-6 h-6 rounded-full bg-emerald-950 border border-emerald-500/40 flex items-center justify-center text-emerald-400 text-xs font-black animate-spin">
+                      ❖
+                    </div>
+                    <span>Synthesizing drill scenario based on AST analysis...</span>
+                  </div>
+                ) : questionData ? (
+                  <div className="space-y-4">
+                    <div className="text-xs font-mono text-emerald-300 bg-emerald-950/60 p-3 rounded-xl border border-emerald-500/20">
+                      <span className="font-bold text-slate-400 uppercase text-[10px] block mb-1">
+                        Target Flaw
+                      </span>
+                      {questionData.target_flaw}
+                    </div>
+
+                    <div className="prose prose-invert prose-emerald text-sm text-slate-200 leading-relaxed prose-p:my-2">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          p: ({ children }) => <p className="mb-3 leading-relaxed text-slate-200">{children}</p>,
+                          strong: ({ children }) => <strong className="font-bold text-emerald-400">{children}</strong>,
+                          code: ({ children }) => (
+                            <code className="rounded bg-emerald-950/70 px-1.5 py-0.5 font-mono text-[0.9em] text-emerald-200">
+                              {children}
+                            </code>
+                          ),
+                        }}
+                      >
+                        {normalizeMarkdown(questionData.question)}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Sticky Footer Trigger */}
+              <div className="p-4 border-t border-emerald-950/60 bg-[#020706]">
+                <button
+                  onClick={() => fetchQuestion(difficulty, report)}
+                  disabled={isGenerating || isEvaluating}
+                  className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-700/60 text-emerald-300 text-xs font-bold rounded-xl transition-all disabled:opacity-50"
+                >
+                  ↻ Generate New Scenario
+                </button>
+              </div>
+            </section>
+          )}
+
+          {/* DRAGGABLE RESIZER */}
+          {showQuestionPanel && showAnswerPanel && (
+            <button
+              type="button"
+              aria-label="Resize interview panels"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                setIsResizing(true);
+              }}
+              className="hidden w-2 shrink-0 cursor-col-resize border-x border-emerald-950/60 bg-emerald-950/20 hover:bg-emerald-500/50 lg:block"
+            />
+          )}
+
+          {/* COLUMN 3: RIGHT ANSWER & DETAILED EVALUATION PANEL */}
+          {showAnswerPanel && (
+            <section className="min-w-0 flex-1 bg-[#030908] flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between p-4 border-b border-emerald-950/60">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Answer
+                </h3>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-slate-500 font-mono">Markdown supported</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAnswerPanel(false)}
+                    title="Hide answer panel"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-950/30 px-2 py-1 text-[10px] font-bold text-emerald-300 hover:bg-emerald-950/70"
+                  >
+                    <PanelRightClose size={13} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Scrollable Answer Workspace & Feedback Output */}
+              <div className="flex-1 p-6 overflow-y-auto space-y-6 flex flex-col">
+                <textarea
+                  value={candidateAnswer}
+                  onChange={(e) => setCandidateAnswer(e.target.value)}
+                  placeholder="Detail your technical solution, pattern implementation, or modular decoupling strategy..."
+                  className="min-h-[220px] flex-1 w-full bg-slate-950/90 border border-emerald-500/30 rounded-2xl p-5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-400 transition-all resize-none font-mono leading-relaxed shadow-inner"
+                />
+
+              </div>
+
+              {/* Sticky Submit Footer */}
+              <div className="p-4 border-t border-emerald-950/60 bg-[#030908]">
+                <button
+                  onClick={handleSubmitAnswer}
+                  disabled={isEvaluating || !candidateAnswer.trim() || isGenerating}
+                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] flex items-center justify-center gap-2"
+                >
+                  {isEvaluating ? (
+                    <span>Evaluating Technical Architecture...</span>
+                  ) : (
+                    <span>Submit Answer →</span>
+                  )}
+                </button>
+              </div>
+            </section>
+          )}
+        </div>
       </div>
+
+      {/* RESET CONFIRMATION MODAL */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#030908] border border-emerald-500/40 rounded-3xl p-8 max-w-md w-full space-y-6">
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-slate-100">Reset Current Drill?</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                This action will clear your written answer, evaluation feedback, and fetch a new scenario.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={() => setShowResetModal(false)}
+                className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold rounded-xl text-xs border border-slate-700/50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleResetDrill}
+                className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs"
+              >
+                Confirm Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXIT CONFIRMATION MODAL */}
+      {showExitModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#030908] border border-rose-500/40 rounded-3xl p-8 max-w-md w-full space-y-6">
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-slate-100">Exit to Home Page?</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Returning to the home page will end your active session dashboard.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={() => setShowExitModal(false)}
+                className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold rounded-xl text-xs border border-slate-700/50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  clearReposeerSession();
+                  router.push("/");
+                }}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-xl text-xs"
+              >
+                Exit Session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

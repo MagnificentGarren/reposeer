@@ -66,7 +66,7 @@ async def seer_casual_chat(payload: SeerChatRequest):
         f"- Overall Architecture Score: {scores.get('overall', 'N/A')}/100\n"
         f"- Maintainability: {scores.get('maintainability', 'N/A')}/100\n"
         f"- Testability: {scores.get('testability', 'N/A')}/100\n"
-        f"- Coupling Risk: {scores.get('coupling_risk', 'N/A')}/100\n"
+        f"- Dependency Health: {scores.get('dependency_health', 'N/A')}/100\n"
         "\nSOURCE AND STRUCTURAL REPOSITORY CONTEXT:\n"
         f"{chr(10).join(repository_context) or 'No repository context was provided.'}\n\n"
         "Answer the user's prompt using the repository context above. Do not claim to have inspected files "

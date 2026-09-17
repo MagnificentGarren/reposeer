@@ -16,7 +16,7 @@ interface RepositoryScores {
   overall?: number;
   maintainability?: number;
   testability?: number;
-  coupling_risk?: number;
+  dependency_health?: number;
 }
 
 interface RepositoryReport {
@@ -73,6 +73,7 @@ export default function SeerCasualPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([DEFAULT_WELCOME_MESSAGE]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
   
   // Modals
   const [showExitModal, setShowExitModal] = useState(false);
@@ -122,7 +123,7 @@ export default function SeerCasualPage() {
       return {
         files: 0,
         modules: 0,
-        scores: { overall: 0, maintainability: 0, testability: 0, couplingRisk: 0 },
+        scores: { overall: 0, maintainability: 0, testability: 0, dependencyHealth: 0 },
       };
     }
 
@@ -138,7 +139,7 @@ export default function SeerCasualPage() {
         overall: scores.overall ?? 0,
         maintainability: scores.maintainability ?? 0,
         testability: scores.testability ?? 0,
-        couplingRisk: scores.coupling_risk ?? 0,
+        dependencyHealth: scores.dependency_health ?? 0,
       },
     };
   }, [report]);
@@ -250,6 +251,14 @@ export default function SeerCasualPage() {
 
         {/* Action Controls */}
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowSidebar((visible) => !visible)}
+            aria-expanded={showSidebar}
+            className="px-4 py-2 bg-emerald-950/30 hover:bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 text-xs font-bold rounded-xl transition-all"
+          >
+            {showSidebar ? "Hide Panel" : "Show Panel"}
+          </button>
           <Link
             href="/seer/interview"
             className="px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold rounded-xl transition-all shadow-[0_0_10px_rgba(245,158,11,0.1)]"
@@ -274,7 +283,8 @@ export default function SeerCasualPage() {
       {/* DASHBOARD BODY */}
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT SIDEBAR */}
-        <aside className="w-80 border-r border-emerald-950/60 bg-[#020706] p-6 flex flex-col gap-6 overflow-y-auto hidden lg:flex">
+        {showSidebar && (
+          <aside className="w-80 shrink-0 border-r border-emerald-950/60 bg-[#020706] p-6 flex flex-col gap-6 overflow-y-auto hidden lg:flex">
           {/* OVERHAULED SCORE CARD */}
           <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-5 space-y-5">
             <div className="text-center space-y-2">
@@ -293,7 +303,7 @@ export default function SeerCasualPage() {
             <div className="grid grid-cols-1 gap-2.5 border-t border-emerald-500/20 pt-4">
               <ScoreMetric label="Maintainability" value={metrics.scores.maintainability} />
               <ScoreMetric label="Testability" value={metrics.scores.testability} />
-              <ScoreMetric label="Coupling Risk" value={metrics.scores.couplingRisk} />
+              <ScoreMetric label="Dependency Health" value={metrics.scores.dependencyHealth} />
             </div>
           </div>
 
@@ -328,10 +338,11 @@ export default function SeerCasualPage() {
               ))}
             </div>
           </div>
-        </aside>
+          </aside>
+        )}
 
         {/* RIGHT MAIN CHAT AREA */}
-        <main className="flex-1 flex flex-col bg-[#030908] relative">
+        <main className="min-w-0 flex-1 flex flex-col overflow-hidden bg-[#030908] relative">
           <div className="px-8 py-4 border-b border-emerald-950/40 flex items-center justify-between bg-[#030908]/50">
             <div className="flex items-center gap-3">
               <span className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse" />
@@ -341,7 +352,7 @@ export default function SeerCasualPage() {
           </div>
 
           {/* Chat Stream */}
-          <div className="flex-1 overflow-y-auto p-8 space-y-6">
+          <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-8 space-y-6">
             {messages.map((msg, index) => (
               <div
                 key={index}
@@ -353,7 +364,7 @@ export default function SeerCasualPage() {
                   </div>
                 )}
                 <div
-                  className={`max-w-2xl rounded-2xl p-5 text-sm leading-relaxed ${
+                    className={`min-w-0 max-w-full overflow-hidden break-words rounded-2xl p-5 text-sm leading-relaxed ${
                     msg.sender === "user"
                       ? "bg-emerald-500 text-slate-950 font-medium rounded-tr-none shadow-[0_0_15px_rgba(16,185,129,0.2)] whitespace-pre-wrap"
                       : "bg-slate-950/80 border border-emerald-500/20 text-slate-200 rounded-tl-none shadow-md prose prose-invert prose-emerald max-w-none text-sm prose-p:my-3 prose-ul:my-1 prose-li:my-0.5"
@@ -395,7 +406,7 @@ export default function SeerCasualPage() {
                           </code>
                         ),
                         pre: ({ children }) => (
-                          <pre className="my-4 overflow-x-auto rounded-xl border border-emerald-500/20 bg-[#020706] p-4 text-xs leading-relaxed text-slate-300">
+                          <pre className="my-4 overflow-hidden whitespace-pre-wrap break-words rounded-xl border border-emerald-500/20 bg-[#020706] p-4 text-xs leading-relaxed text-slate-300">
                             {children}
                           </pre>
                         ),

@@ -1,4 +1,5 @@
 import os
+import re
 from fastapi import APIRouter, HTTPException
 from google import genai
 from google.genai import types
@@ -18,6 +19,20 @@ class EvaluateResponseRequest(BaseModel):
     question: str
     candidate_answer: str
     difficulty: str = "Medium"
+
+
+def extract_evaluation_scores(text: str) -> dict[str, int]:
+    """Extract the requested score lines so cards match the assessor feedback."""
+    score_patterns = {
+        "architecture": r"architecture(?:\s+design)?\s*[:\-]\s*(\d{1,3})\s*(?:/\s*100)?",
+        "clarity": r"clarity\s*[:\-]\s*(\d{1,3})\s*(?:/\s*100)?",
+        "modularity": r"(?:modularity|modular\s+thinking)\s*[:\-]\s*(\d{1,3})\s*(?:/\s*100)?",
+    }
+    scores = {}
+    for name, pattern in score_patterns.items():
+        match = re.search(pattern, text, re.IGNORECASE)
+        scores[name] = min(100, max(0, int(match.group(1)))) if match else 0
+    return scores
 
 
 @router.post("/generate-question")
@@ -94,7 +109,8 @@ async def evaluate_candidate_response(payload: EvaluateResponseRequest):
     prompt = (
         f"Interview Question: {payload.question}\n\n"
         f"Candidate Answer:\n{payload.candidate_answer}\n\n"
-        "Provide score (0-100) for Architecture, Clarity, and Modular Thinking, followed by brief feedback."
+        "Start the response with exactly these three lines: Architecture: <score>/100, Clarity: <score>/100, Modularity: <score>/100. "
+        "Then provide brief structured feedback. Scores must be whole numbers from 0 to 100."
     )
 
     try:
@@ -107,9 +123,15 @@ async def evaluate_candidate_response(payload: EvaluateResponseRequest):
             ),
         )
 
+        evaluation = response.text or "Good effort. Consider breaking down tight dependencies further."
+        scores = extract_evaluation_scores(evaluation)
+        if not any(scores.values()):
+            scores = {"architecture": 70, "clarity": 70, "modularity": 70}
+        scores["overall"] = round(sum(scores.values()) / 3)
+
         return {
-            "evaluation": response.text or "Good effort. Consider breaking down tight dependencies further.",
-            "scores": {"architecture": 82, "clarity": 85, "modularity": 78},
+            "evaluation": evaluation,
+            "scores": scores,
         }
     except Exception as e:
         print(f"[Evaluation Error]: {str(e)}")

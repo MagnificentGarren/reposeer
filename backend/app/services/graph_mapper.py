@@ -90,17 +90,18 @@ class DependencyGraphMapper:
         average_classes = sum(len(file_info["classes"]) for file_info in parsed_files) / file_count
         average_functions = sum(len(file_info["functions"]) for file_info in parsed_files) / file_count
 
-        coupling_risk = min(
+        coupling_penalty = min(
             100,
             round(average_imports * 12 + len(circular_dependencies) * 20),
         )
-        maintainability = max(0, 100 - round(coupling_risk * 0.55) - round(average_classes * 4))
+        dependency_health = 100 - coupling_penalty
+        maintainability = max(0, 100 - round(coupling_penalty * 0.55) - round(average_classes * 4))
         testability = max(0, 100 - round(average_classes * 3) - round(average_functions * 1.5))
 
         return {
-            "overall": round((maintainability + (100 - coupling_risk) + testability) / 3),
+            "overall": round((maintainability + dependency_health + testability) / 3),
             "maintainability": maintainability,
-            "coupling_risk": coupling_risk,
+            "dependency_health": dependency_health,
             "testability": testability,
         }
 
