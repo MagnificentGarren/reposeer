@@ -146,6 +146,8 @@ export default function SeerResultsPage() {
         functions: Array.isArray(item.functions)
           ? item.functions.length
           : item.functions || (item.functions_count ?? 0),
+        isTestFile: item.is_test_file === true,
+        syntaxErrors: Array.isArray(item.syntax_errors) ? item.syntax_errors.length : 0,
       }));
     }
     if (typeof raw === "object" && raw !== null) {
@@ -157,6 +159,8 @@ export default function SeerResultsPage() {
         functions: Array.isArray(value?.functions)
           ? value.functions.length
           : value?.functions || (value?.functions_count ?? 0),
+        isTestFile: value?.is_test_file === true,
+        syntaxErrors: Array.isArray(value?.syntax_errors) ? value.syntax_errors.length : 0,
       }));
     }
     return [];
@@ -329,8 +333,20 @@ export default function SeerResultsPage() {
                   key={idx}
                   className="bg-emerald-950/20 border border-emerald-500/20 p-4 rounded-xl flex items-center justify-between hover:border-emerald-500/40 transition-all backdrop-blur-md"
                 >
-                  <span className="font-mono text-sm text-slate-200">{item.path}</span>
-                  <div className="flex gap-2">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="font-mono text-sm text-slate-200 truncate">{item.path}</span>
+                    {item.isTestFile && (
+                      <span className="shrink-0 px-2 py-1 bg-cyan-950/70 text-cyan-300 text-[10px] font-semibold uppercase rounded-md border border-cyan-500/30">
+                        Test
+                      </span>
+                    )}
+                    {item.syntaxErrors > 0 && (
+                      <span className="shrink-0 px-2 py-1 bg-rose-950/70 text-rose-300 text-[10px] font-semibold uppercase rounded-md border border-rose-500/30">
+                        {item.syntaxErrors} Syntax Error{item.syntaxErrors === 1 ? "" : "s"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 gap-2">
                     <span className="px-3 py-1 bg-emerald-950/80 text-emerald-400 text-xs font-semibold rounded-md border border-emerald-500/30">
                       {item.classes} Classes
                     </span>
