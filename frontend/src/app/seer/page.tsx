@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -13,13 +13,73 @@ export default function SeerHubPage() {
   const [activeTab, setActiveTab] = useState<"github" | "upload">("github");
   const [repoUrl, setRepoUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState("Initializing AST Engine...");
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  const clearSelectedFile = () => {
+    setFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const validateBeforeSubmit = () => {
+    if (activeTab === "github") {
+      const trimmed = repoUrl.trim();
+      if (!trimmed) {
+        setValidationError("Please enter a GitHub repository URL.");
+        return false;
+      }
+
+      try {
+        const url = new URL(trimmed);
+        const isGitHubRepo = url.hostname === "github.com" || url.hostname.endsWith(".github.com");
+        const hasRepoPath = url.pathname.split("/").filter(Boolean).length >= 2;
+
+        if (!isGitHubRepo || !hasRepoPath) {
+          setValidationError("Please provide a valid GitHub repository URL, for example: https://github.com/owner/repo");
+          return false;
+        }
+      } catch {
+        setValidationError("Please provide a valid GitHub repository URL, for example: https://github.com/owner/repo");
+        return false;
+      }
+    }
+
+    if (activeTab === "upload") {
+      if (!file) {
+        setValidationError("Please choose a ZIP archive to upload.");
+        return false;
+      }
+
+      if (!file.name.toLowerCase().endsWith(".zip")) {
+        clearSelectedFile();
+        setValidationError("This file must be a ZIP archive (.zip). Please choose a valid project archive.");
+        return false;
+      }
+
+      if (file.size > 50 * 1024 * 1024) {
+        clearSelectedFile();
+        setValidationError("This ZIP is too large. Reposeer accepts archives under 50MB. Please compress it or use a GitHub repository instead.");
+        return false;
+      }
+    }
+
+    setValidationError(null);
+    return true;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!validateBeforeSubmit()) {
+      return;
+    }
+
     setIsAnalyzing(true);
     setProgress(5);
     setStatusText("Spawning analysis worker pipeline...");
@@ -43,7 +103,13 @@ export default function SeerHubPage() {
       }, 400);
     } catch (err: any) {
       console.error("Analysis pipeline error:", err);
-      setStatusText(err?.message || "Failed to complete analysis pipeline.");
+      const message = err?.message || "Failed to complete analysis pipeline.";
+      setValidationError(message);
+      if (activeTab === "github") {
+        setRepoUrl("");
+      } else {
+        clearSelectedFile();
+      }
       setIsAnalyzing(false);
     }
   };
@@ -153,6 +219,12 @@ export default function SeerHubPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6 max-w-xl mx-auto">
+              {validationError && (
+                <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  {validationError}
+                </div>
+              )}
+
               {activeTab === "github" ? (
                 <div className="space-y-2">
                   <label className="block text-xs font-mono uppercase tracking-wider text-slate-300">
@@ -162,7 +234,10 @@ export default function SeerHubPage() {
                     type="url"
                     required
                     value={repoUrl}
-                    onChange={(e) => setRepoUrl(e.target.value)}
+                    onChange={(e) => {
+                      setRepoUrl(e.target.value);
+                      if (validationError) setValidationError(null);
+                    }}
                     placeholder="https://github.com/username/project"
                     className="w-full px-5 py-4 rounded-xl bg-slate-950/90 border border-emerald-500/30 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20 transition-all text-sm font-mono"
                   />
@@ -172,12 +247,25 @@ export default function SeerHubPage() {
                   <label className="block text-xs font-mono uppercase tracking-wider text-slate-300">
                     Codebase Archive (.zip)
                   </label>
-                  <div className="border-2 border-dashed border-emerald-500/30 rounded-2xl p-8 text-center bg-slate-950/60 hover:bg-slate-950/90 hover:border-emerald-500/60 transition-all cursor-pointer relative group">
+                  <div className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer relative group ${validationError ? "border-red-500/60 bg-red-500/5" : "border-emerald-500/30 bg-slate-950/60 hover:bg-slate-950/90 hover:border-emerald-500/60"}`}>
                     <input
+                      ref={fileInputRef}
                       type="file"
                       accept=".zip"
                       required
-                      onChange={(e) => setFile(e.target.files?.[0] || null)}
+                      onChange={(e) => {
+                        const nextFile = e.target.files?.[0] || null;
+                        setFile(nextFile);
+                        if (validationError) setValidationError(null);
+                        if (nextFile && !nextFile.name.toLowerCase().endsWith(".zip")) {
+                          clearSelectedFile();
+                          setValidationError("This file must be a ZIP archive (.zip). Please choose a valid project archive.");
+                        }
+                        if (nextFile && nextFile.size > 50 * 1024 * 1024) {
+                          clearSelectedFile();
+                          setValidationError("This ZIP is too large. Reposeer accepts archives under 50MB. Please compress it or use a GitHub repository instead.");
+                        }
+                      }}
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     />
                     <div className="space-y-2">
