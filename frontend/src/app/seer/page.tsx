@@ -122,6 +122,7 @@ export default function SeerHubPage() {
           src="/seer-new.jpg"
           alt="Seer Background"
           fill
+          sizes="100vw"
           className="object-cover opacity-35 mix-blend-luminosity filter blur-sm scale-105"
           priority
         />

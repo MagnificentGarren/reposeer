@@ -93,8 +93,9 @@ async def generate_interview_question(payload: QuestionGenerateRequest):
         "snippet representing the issue being discussed, introduced by the heading '### Referenced Code'."
     )
 
+    gemini_client = get_gemini_client()
     try:
-        response = get_gemini_client().models.generate_content(
+        response = await gemini_client.aio.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
@@ -111,6 +112,8 @@ async def generate_interview_question(payload: QuestionGenerateRequest):
     except Exception as e:
         print(f"[Interview Gen Error]: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate question: {str(e)}")
+    finally:
+        await gemini_client.aio.aclose()
 
 
 @router.post("/evaluate")
@@ -128,8 +131,9 @@ async def evaluate_candidate_response(payload: EvaluateResponseRequest):
         "Then provide brief structured feedback. Scores must be whole numbers from 0 to 100."
     )
 
+    gemini_client = get_gemini_client()
     try:
-        response = get_gemini_client().models.generate_content(
+        response = await gemini_client.aio.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
@@ -151,3 +155,5 @@ async def evaluate_candidate_response(payload: EvaluateResponseRequest):
     except Exception as e:
         print(f"[Evaluation Error]: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to evaluate answer: {str(e)}")
+    finally:
+        await gemini_client.aio.aclose()

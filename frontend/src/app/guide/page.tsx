@@ -151,7 +151,7 @@ export default function GuidePage() {
               <Link href="#step-01" className="mt-9 inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 shadow-[0_0_20px_rgba(16,185,129,0.25)] transition hover:bg-emerald-400">Start the walkthrough <ArrowDown className="h-4 w-4" /></Link>
             </div>
             <div className="relative aspect-[4/3] overflow-hidden rounded-3xl border border-emerald-500/30 bg-emerald-950/20 p-3 shadow-[0_0_50px_rgba(16,185,129,0.14)]">
-              <Image src="/seer-new.jpg" alt="The Reposeer Seer architecture intelligence interface" fill className="rounded-2xl object-cover opacity-90" priority />
+              <Image src="/seer-new.jpg" alt="The Reposeer Seer architecture intelligence interface" fill sizes="(max-width: 1024px) 100vw, 42vw" className="rounded-2xl object-cover opacity-90" priority />
               <div className="absolute inset-x-8 bottom-8 rounded-xl border border-emerald-400/30 bg-[#030908]/80 px-4 py-3 font-mono text-xs text-emerald-300 backdrop-blur-md">&gt; begin repository inspection_</div>
             </div>
           </div>

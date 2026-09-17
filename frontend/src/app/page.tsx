@@ -93,6 +93,7 @@ export default function LandingPage() {
                   src="/seer-new.jpg"
                   alt="Seer Architecture Intelligence"
                   fill
+                  sizes="(max-width: 1024px) 100vw, 28rem"
                   className="object-cover group-hover:scale-105 transition-transform duration-500"
                   priority
                 />
