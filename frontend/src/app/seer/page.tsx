@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { submitAnalysis } from "@/lib/api";
 import OrbLoader from "@/components/OrbLoader";
+import { startNewRepositorySession } from "@/lib/session";
 
 export default function SeerHubPage() {
   const router = useRouter();
@@ -34,7 +35,7 @@ export default function SeerHubPage() {
       });
 
       if (typeof window !== "undefined") {
-        sessionStorage.setItem("reposeer_latest_report", JSON.stringify(res));
+        startNewRepositorySession(res);
       }
 
       setTimeout(() => {

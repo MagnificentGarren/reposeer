@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { clearReposeerSession, readReposeerSession } from "@/lib/session";
 
 export default function ModeSelectionPage() {
   const router = useRouter();
@@ -12,19 +13,10 @@ export default function ModeSelectionPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const rawData = sessionStorage.getItem("reposeer_latest_report");
-      if (rawData) {
-        try {
-          const parsed = JSON.parse(rawData);
-          const name =
-            parsed.repo_name ||
-            parsed.target ||
-            parsed.result?.repo_name ||
-            "Uploaded Codebase";
-          setRepoName(name);
-        } catch (e) {
-          console.error("Failed to extract repository name:", e);
-        }
+      const storedSession = readReposeerSession();
+      if (storedSession?.report) {
+        const report = storedSession.report;
+        setRepoName(report.repo_name || report.target || "Uploaded Codebase");
       }
     }
   }, []);
@@ -219,7 +211,10 @@ func data_struct() {
                 Cancel
               </button>
               <button
-                onClick={() => router.push("/")}
+                onClick={() => {
+                  clearReposeerSession();
+                  router.push("/");
+                }}
                 className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-xl text-xs transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)]"
               >
                 Exit Session

@@ -32,11 +32,24 @@ async def seer_casual_chat(payload: SeerChatRequest):
     scores = graph_data.get("scores") or {}
 
     ast_summary = context.get("ast_summary") or []
-    sample_files: list[str] = [
-        str(f.get("relative_path"))
-        for f in ast_summary[:10]
-        if isinstance(f, dict) and f.get("relative_path") is not None
-    ]
+    repository_files = context.get("repository_files") or []
+    repository_context = []
+    for file in repository_files[:20]:
+        if not isinstance(file, dict) or not file.get("relative_path"):
+            continue
+        repository_context.append(
+            f"FILE: {file['relative_path']}\n{str(file.get('code', ''))[:8000]}"
+        )
+
+    if not repository_context:
+        repository_context = [
+            f"FILE: {file.get('file_path', 'unknown')}\n"
+            f"Classes: {file.get('classes', [])}\n"
+            f"Functions: {file.get('functions', [])}\n"
+            f"Imports: {file.get('imports', [])}"
+            for file in ast_summary[:20]
+            if isinstance(file, dict)
+        ]
 
     system_instruction = (
         "You are Reposeer Casual Assistant, an executive AI software architect explaining repository structures "
@@ -54,8 +67,10 @@ async def seer_casual_chat(payload: SeerChatRequest):
         f"- Maintainability: {scores.get('maintainability', 'N/A')}/100\n"
         f"- Testability: {scores.get('testability', 'N/A')}/100\n"
         f"- Coupling Risk: {scores.get('coupling_risk', 'N/A')}/100\n"
-        f"- Sample High-Level Modules: {', '.join(sample_files) if sample_files else 'Not specified'}\n\n"
-        "Answer the user's prompt using the context above."
+        "\nSOURCE AND STRUCTURAL REPOSITORY CONTEXT:\n"
+        f"{chr(10).join(repository_context) or 'No repository context was provided.'}\n\n"
+        "Answer the user's prompt using the repository context above. Do not claim to have inspected files "
+        "that are not present in that context."
     )
 
     def event_generator():

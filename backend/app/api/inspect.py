@@ -76,6 +76,13 @@ def run_analysis_task(job_id: str, repo_url: str):
             "result": {
                 "files_analyzed": len(python_files),
                 "ast_summary": ast_data,
+                "repository_files": [
+                    {
+                        "relative_path": file["relative_path"],
+                        "code": file["code"][:12000],
+                    }
+                    for file in python_files[:40]
+                ],
                 "dependency_graph": graph_metrics,
             },
         }

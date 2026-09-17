@@ -14,6 +14,7 @@ import {
   Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { clearReposeerSession, readReposeerSession } from "@/lib/session";
 
 // Comprehensive property extractor for node/file labels
 const extractString = (val: any, fallback = ""): string => {
@@ -49,11 +50,10 @@ export default function SeerResultsPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const rawData = sessionStorage.getItem("reposeer_latest_report");
-      if (rawData) {
+      const storedSession = readReposeerSession();
+      if (storedSession?.report) {
         try {
-          const rawParsed = JSON.parse(rawData);
-          const parsed = rawParsed.result || rawParsed;
+          const parsed = storedSession.report;
 
           setReport(parsed);
 
@@ -166,6 +166,7 @@ export default function SeerResultsPage() {
 
   const handleConfirmExit = () => {
     if (exitTarget) {
+      clearReposeerSession();
       router.push(exitTarget);
     }
   };

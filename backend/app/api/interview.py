@@ -24,11 +24,24 @@ class EvaluateResponseRequest(BaseModel):
 async def generate_interview_question(payload: QuestionGenerateRequest):
     context = payload.report_context or {}
     ast_summary = context.get("ast_summary") or []
+    repository_files = context.get("repository_files") or []
 
-    sample_code = ""
-    for item in ast_summary[:5]:
-        if isinstance(item, dict) and item.get("relative_path"):
-            sample_code += f"File: {item.get('relative_path')}\n"
+    repository_context = []
+    for file in repository_files[:20]:
+        if isinstance(file, dict) and file.get("relative_path"):
+            repository_context.append(
+                f"FILE: {file['relative_path']}\n{str(file.get('code', ''))[:8000]}"
+            )
+
+    if not repository_context:
+        repository_context = [
+            f"FILE: {item.get('file_path', 'unknown')}\n"
+            f"Classes: {item.get('classes', [])}\n"
+            f"Functions: {item.get('functions', [])}\n"
+            f"Imports: {item.get('imports', [])}"
+            for item in ast_summary[:20]
+            if isinstance(item, dict)
+        ]
 
     system_instruction = (
         "You are Reposeer Technical Interviewer, an elite lead engineer conducting architectural code-review interviews.\n"
@@ -39,12 +52,14 @@ async def generate_interview_question(payload: QuestionGenerateRequest):
         "3. Focus on coupling, modularity, refactoring, and testability challenges.\n"
         f"4. Difficulty Level: {payload.difficulty}.\n\n"
         "REPOSITORY CONTEXT:\n"
-        f"- Sample Files: {sample_code or 'main.py, utils.py'}\n"
+        f"{chr(10).join(repository_context) or 'No repository context was provided.'}\n"
+        "Use only the files and code shown above. The question must name a real file or module from this repository.\n"
     )
 
     prompt = (
         f"Generate a {payload.difficulty}-level interview question asking the candidate how they would refactor "
-        "or re-architect a specific flaw in this codebase. End your response with a concise, realistic Python code "
+        "or re-architect a specific flaw in this codebase, referring to the exact file and code shown in the repository context. "
+        "End your response with a concise, realistic Python code "
         "snippet representing the issue being discussed, introduced by the heading '### Referenced Code'."
     )
 

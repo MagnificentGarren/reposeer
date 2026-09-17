@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-
-const STORAGE_KEY_REPORT = "reposeer_latest_report";
+import {
+  readReposeerSession,
+  writeReposeerSession,
+} from "@/lib/session";
 
 type Difficulty = "Easy" | "Medium" | "Hard";
 
@@ -52,20 +54,38 @@ export default function SeerInterviewPage() {
   // Load session report & trigger initial fetch immediately
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const rawReport = sessionStorage.getItem(STORAGE_KEY_REPORT);
-      if (rawReport) {
-        try {
-          const parsed = JSON.parse(rawReport);
-          const activeReport = parsed.result || parsed;
-          setReport(activeReport);
-          // Fetch immediately once report is retrieved
-          fetchQuestion("Easy", activeReport);
-        } catch (e) {
-          console.error("Failed to parse report:", e);
+      const storedSession = readReposeerSession();
+      if (storedSession?.report) {
+        setReport(storedSession.report);
+        const storedInterview = storedSession.interview;
+        setDifficulty(storedInterview.difficulty);
+        setQuestionData(storedInterview.questionData);
+        setCandidateAnswer(storedInterview.candidateAnswer);
+        setEvaluationResult(storedInterview.evaluationResult);
+
+        if (!storedInterview.questionData) {
+          fetchQuestion(storedInterview.difficulty, storedSession.report);
         }
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !report) return;
+
+    const storedSession = readReposeerSession();
+    if (storedSession?.report) {
+      writeReposeerSession({
+        ...storedSession,
+        interview: {
+          difficulty,
+          questionData,
+          candidateAnswer,
+          evaluationResult,
+        },
+      });
+    }
+  }, [report, difficulty, questionData, candidateAnswer, evaluationResult]);
 
   const handleDifficultyChange = (diff: Difficulty) => {
     setDifficulty(diff);

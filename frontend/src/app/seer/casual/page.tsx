@@ -5,11 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-
-interface ChatMessage {
-  sender: "user" | "ai";
-  text: string;
-}
+import {
+  clearReposeerSession,
+  readReposeerSession,
+  writeReposeerSession,
+} from "@/lib/session";
+import type { ChatMessage } from "@/lib/session";
 
 interface RepositoryScores {
   overall?: number;
@@ -28,9 +29,6 @@ interface RepositoryReport {
   };
   scores?: RepositoryScores;
 }
-
-const STORAGE_KEY_REPORT = "reposeer_latest_report";
-const STORAGE_KEY_CHAT = "reposeer_casual_chat_history";
 
 const DEFAULT_WELCOME_MESSAGE: ChatMessage = {
   sender: "ai",
@@ -87,31 +85,15 @@ export default function SeerCasualPage() {
     let cancelled = false;
 
     if (typeof window !== "undefined") {
-      const rawReport = sessionStorage.getItem(STORAGE_KEY_REPORT);
-      if (rawReport) {
-        try {
-          const parsedReport = JSON.parse(rawReport) as RepositoryReport;
-          const rootData = parsedReport.result || parsedReport;
-          window.setTimeout(() => {
-            if (!cancelled) setReport(rootData);
-          }, 0);
-        } catch (e) {
-          console.error("Failed to parse stored report:", e);
-        }
-      }
-
-      const rawChat = sessionStorage.getItem(STORAGE_KEY_CHAT);
-      if (rawChat) {
-        try {
-          const parsedChat = JSON.parse(rawChat) as ChatMessage[];
-          if (Array.isArray(parsedChat) && parsedChat.length > 0) {
-            window.setTimeout(() => {
-              if (!cancelled) setMessages(parsedChat);
-            }, 0);
+      const storedSession = readReposeerSession();
+      if (storedSession?.report) {
+        window.setTimeout(() => {
+          if (cancelled) return;
+          setReport(storedSession.report);
+          if (storedSession.casualMessages.length > 0) {
+            setMessages(storedSession.casualMessages);
           }
-        } catch (e) {
-          console.error("Failed to parse stored chat history:", e);
-        }
+        }, 0);
       }
     }
 
@@ -122,10 +104,13 @@ export default function SeerCasualPage() {
 
   // 2. Persist Chat Messages whenever updated
   useEffect(() => {
-    if (typeof window !== "undefined" && messages.length > 0) {
-      sessionStorage.setItem(STORAGE_KEY_CHAT, JSON.stringify(messages));
+    if (typeof window !== "undefined" && report && messages.length > 0) {
+      const storedSession = readReposeerSession();
+      if (storedSession?.report) {
+        writeReposeerSession({ ...storedSession, casualMessages: messages });
+      }
     }
-  }, [messages]);
+  }, [messages, report]);
 
   // 3. Auto-scroll to bottom on message updates
   useEffect(() => {
@@ -161,7 +146,10 @@ export default function SeerCasualPage() {
   const handleClearChat = () => {
     setMessages([DEFAULT_WELCOME_MESSAGE]);
     if (typeof window !== "undefined") {
-      sessionStorage.removeItem(STORAGE_KEY_CHAT);
+      const storedSession = readReposeerSession();
+      if (storedSession) {
+        writeReposeerSession({ ...storedSession, casualMessages: [] });
+      }
     }
     setShowResetModal(false);
   };
@@ -521,7 +509,10 @@ export default function SeerCasualPage() {
                 Cancel
               </button>
               <button
-                onClick={() => router.push("/")}
+                onClick={() => {
+                  clearReposeerSession();
+                  router.push("/");
+                }}
                 className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-xl text-xs transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)]"
               >
                 Exit Session
