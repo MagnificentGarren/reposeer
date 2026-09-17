@@ -24,7 +24,7 @@ const steps = [
     number: "01",
     title: "Connect a repository",
     description:
-      "Start with a public GitHub repository or bring a local ZIP archive. Reposeer uses the source as the foundation for every later view.",
+      "Start with a public GitHub repository or bring a local ZIP archive. Reposeer Seer searches the repository for Python files and uses them as the foundation for every later view.",
     note: "Choose the input that fits your workflow.",
     image: "/guide/01-seer-hub-github.png",
     alt: "Reposeer Seer Hub with the GitHub repository input selected",
@@ -42,16 +42,6 @@ const steps = [
   },
   {
     number: "03",
-    title: "Choose your path",
-    description:
-      "Once analysis is complete, choose how you want to work with the report. Casual Mode is for open exploration; Interview Mode turns the same context into a scored architecture drill.",
-    note: "Both modes begin with the same repository analysis.",
-    image: "/guide/03-mode-selection.png",
-    alt: "Reposeer mode selection screen showing Casual Mode and Interview Mode",
-    icon: Sparkles,
-  },
-  {
-    number: "04",
     title: "Read the dependency graph",
     description:
       "The graph makes module relationships visible. Nodes represent files or modules, while directed edges show the import flow between them.",
@@ -61,14 +51,24 @@ const steps = [
     icon: Network,
   },
   {
-    number: "05",
+    number: "04",
     title: "Inspect the source structure",
     description:
-      "Switch to AST Breakdown to see what each file contains. Classes and functions provide a structural inventory beneath the graph.",
+      "Switch to AST Breakdown to see what each Python file contains. Classes and functions provide a structural inventory beneath the graph.",
     note: "Use this view to move from system-level shape to file-level detail.",
     image: "/guide/05-ast-breakdown.png",
     alt: "Reposeer AST Breakdown results view",
     icon: ScanSearch,
+  },
+  {
+    number: "05",
+    title: "Choose your path",
+    description:
+      "Once inspection is complete, choose how you want to work with the report. Casual Mode is for open exploration; Interview Mode turns the same context into a scored architecture drill.",
+    note: "Both modes build on the repository analysis and source inspection.",
+    image: "/guide/03-mode-selection.png",
+    alt: "Reposeer mode selection screen showing Casual Mode and Interview Mode",
+    icon: Sparkles,
   },
   {
     number: "06",

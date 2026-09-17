@@ -192,6 +192,25 @@ export default function SeerHubPage() {
               </p>
             </div>
 
+            <div className="mb-8 grid gap-4 rounded-2xl border border-emerald-500/20 bg-slate-950/50 p-5 text-xs sm:grid-cols-2">
+              <div>
+                <h3 className="mb-2 font-bold uppercase tracking-wider text-emerald-300">Accepted</h3>
+                <ul className="space-y-1.5 text-slate-300">
+                  <li>Public GitHub repository links</li>
+                  <li>ZIP archives under 50MB</li>
+                  <li>At least one Python (.py) file</li>
+                </ul>
+              </div>
+              <div>
+                <h3 className="mb-2 font-bold uppercase tracking-wider text-rose-300">Not accepted</h3>
+                <ul className="space-y-1.5 text-slate-300">
+                  <li>Private or file-specific GitHub links</li>
+                  <li>Corrupt or password-protected ZIPs</li>
+                  <li>Archives without Python source code</li>
+                </ul>
+              </div>
+            </div>
+
             {/* Ingestion Mode Selector */}
             <div className="flex rounded-2xl bg-slate-950/80 p-1.5 border border-emerald-500/20 mb-8 max-w-md mx-auto">
               <button

@@ -59,7 +59,9 @@ export default function SeerInterviewPage() {
 
   const [candidateAnswer, setCandidateAnswer] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
   const [isEvaluating, setIsEvaluating] = useState(false);
+  const [evaluationError, setEvaluationError] = useState<string | null>(null);
   const [evaluationResult, setEvaluationResult] = useState<EvaluationResult | null>(null);
 
   const [showQuestionPanel, setShowQuestionPanel] = useState(true);
@@ -99,6 +101,7 @@ export default function SeerInterviewPage() {
 
   const fetchQuestion = async (selectedDiff: Difficulty, currentReport: unknown) => {
     setIsGenerating(true);
+    setGenerationError(null);
     setEvaluationResult(null);
     setCandidateAnswer("");
     try {
@@ -111,12 +114,15 @@ export default function SeerInterviewPage() {
         }),
       });
 
-      if (res.ok) {
-        const data: QuestionData = await res.json();
-        setQuestionData(data);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Unable to generate an interview scenario. Please try again.");
       }
+      const data: QuestionData = await res.json();
+      setQuestionData(data);
     } catch (err) {
       console.error("Error fetching question:", err);
+      setGenerationError(err instanceof Error ? err.message : "Unable to generate an interview scenario. Please try again.");
     } finally {
       setIsGenerating(false);
     }
@@ -180,6 +186,7 @@ export default function SeerInterviewPage() {
     if (!candidateAnswer.trim() || !questionData || isEvaluating) return;
 
     setIsEvaluating(true);
+    setEvaluationError(null);
     try {
       const res = await fetch("http://127.0.0.1:8000/api/interview/evaluate", {
         method: "POST",
@@ -191,25 +198,28 @@ export default function SeerInterviewPage() {
         }),
       });
 
-      if (res.ok) {
-        const data: EvaluationResult = await res.json();
-        setEvaluationResult(data);
-        const storedSession = readReposeerSession();
-        if (storedSession) {
-          writeReposeerSession({
-            ...storedSession,
-            interview: {
-              difficulty,
-              questionData,
-              candidateAnswer,
-              evaluationResult: data,
-            },
-          });
-        }
-        router.push("/seer/interview/results");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Unable to evaluate your answer. Please try again.");
       }
+      const data: EvaluationResult = await res.json();
+      setEvaluationResult(data);
+      const storedSession = readReposeerSession();
+      if (storedSession) {
+        writeReposeerSession({
+          ...storedSession,
+          interview: {
+            difficulty,
+            questionData,
+            candidateAnswer,
+            evaluationResult: data,
+          },
+        });
+      }
+      router.push("/seer/interview/results");
     } catch (err) {
       console.error("Error evaluating answer:", err);
+      setEvaluationError(err instanceof Error ? err.message : "Unable to evaluate your answer. Please try again.");
     } finally {
       setIsEvaluating(false);
     }
@@ -406,6 +416,17 @@ export default function SeerInterviewPage() {
                     </div>
                     <span>Synthesizing drill scenario based on AST analysis...</span>
                   </div>
+                ) : generationError ? (
+                  <div className="rounded-2xl border border-rose-500/30 bg-rose-950/20 p-5 text-sm text-rose-200">
+                    <p>{generationError}</p>
+                    <button
+                      type="button"
+                      onClick={() => fetchQuestion(difficulty, report)}
+                      className="mt-4 rounded-lg border border-rose-400/40 px-3 py-2 text-xs font-bold text-rose-200 hover:bg-rose-950/50"
+                    >
+                      Try again
+                    </button>
+                  </div>
                 ) : questionData ? (
                   <div className="space-y-4">
                     <div className="text-xs font-mono text-emerald-300 bg-emerald-950/60 p-3 rounded-xl border border-emerald-500/20">
@@ -483,6 +504,11 @@ export default function SeerInterviewPage() {
 
               {/* Scrollable Answer Workspace & Feedback Output */}
               <div className="flex-1 p-6 overflow-y-auto space-y-6 flex flex-col">
+                {evaluationError && (
+                  <div className="rounded-xl border border-rose-500/30 bg-rose-950/20 px-4 py-3 text-sm text-rose-200">
+                    {evaluationError}
+                  </div>
+                )}
                 <textarea
                   value={candidateAnswer}
                   onChange={(e) => setCandidateAnswer(e.target.value)}

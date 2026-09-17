@@ -183,7 +183,8 @@ export default function SeerCasualPage() {
       });
 
       if (!response.ok || !response.body) {
-        throw new Error("Failed to initialize telemetry stream.");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Unable to start the repository assistant. Please try again.");
       }
 
       const reader = response.body.getReader();
@@ -202,12 +203,15 @@ export default function SeerCasualPage() {
           return updated;
         });
       }
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error
+        ? err.message
+        : "Unable to complete the assistant response. Please try again.";
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = {
           sender: "ai",
-          text: "Unable to complete telemetry stream. Please ensure the backend engine is active.",
+          text: message,
         };
         return updated;
       });
