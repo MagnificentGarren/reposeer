@@ -8,7 +8,13 @@ from pydantic import BaseModel, Field
 router = APIRouter()
 
 def get_gemini_client():
-    return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="AI features are unavailable because GEMINI_API_KEY is not configured.",
+        )
+    return genai.Client(api_key=api_key)
 
 LEAKED_INTERVIEWER_PREAMBLE = re.compile(
     r"^\s*You are Reposeer Technical Interviewer, an elite lead engineer conducting "

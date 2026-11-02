@@ -7,9 +7,20 @@ from pathlib import Path
 from git import Repo # type: ignore
 
 
-MAX_ARCHIVE_SIZE_BYTES = int(os.getenv("REPOSEER_MAX_ARCHIVE_SIZE_MB", "50")) * 1024 * 1024
-MAX_EXTRACTED_SIZE_BYTES = int(os.getenv("REPOSEER_MAX_EXTRACTED_SIZE_MB", "250")) * 1024 * 1024
-MAX_ARCHIVE_FILES = int(os.getenv("REPOSEER_MAX_ARCHIVE_FILES", "10000"))
+def _positive_int_from_env(name: str, default: int) -> int:
+    value = os.getenv(name, str(default))
+    try:
+        parsed_value = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive whole number; received {value!r}.") from exc
+    if parsed_value <= 0:
+        raise ValueError(f"{name} must be a positive whole number; received {value!r}.")
+    return parsed_value
+
+
+MAX_ARCHIVE_SIZE_BYTES = _positive_int_from_env("REPOSEER_MAX_ARCHIVE_SIZE_MB", 50) * 1024 * 1024
+MAX_EXTRACTED_SIZE_BYTES = _positive_int_from_env("REPOSEER_MAX_EXTRACTED_SIZE_MB", 250) * 1024 * 1024
+MAX_ARCHIVE_FILES = _positive_int_from_env("REPOSEER_MAX_ARCHIVE_FILES", 10000)
 
 
 class IngestionService:

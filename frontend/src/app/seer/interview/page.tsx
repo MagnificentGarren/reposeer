@@ -20,6 +20,7 @@ import {
   readReposeerSession,
   writeReposeerSession,
 } from "@/lib/session";
+import { API_BASE_URL } from "@/lib/config";
 
 type Difficulty = "Easy" | "Medium" | "Hard";
 
@@ -112,7 +113,7 @@ export default function SeerInterviewPage() {
     setEvaluationResult(null);
     setCandidateAnswer("");
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/interview/generate-question", {
+      const res = await fetch(`${API_BASE_URL}/api/interview/generate-question`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -195,7 +196,7 @@ export default function SeerInterviewPage() {
     setIsEvaluating(true);
     setEvaluationError(null);
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/interview/evaluate", {
+      const res = await fetch(`${API_BASE_URL}/api/interview/evaluate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

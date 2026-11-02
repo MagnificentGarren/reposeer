@@ -11,6 +11,7 @@ import {
   writeReposeerSession,
 } from "@/lib/session";
 import type { ChatMessage } from "@/lib/session";
+import { API_BASE_URL } from "@/lib/config";
 
 interface RepositoryScores {
   overall?: number;
@@ -173,7 +174,7 @@ export default function SeerCasualPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/seer/chat", {
+      const response = await fetch(`${API_BASE_URL}/api/seer/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

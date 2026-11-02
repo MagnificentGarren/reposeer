@@ -1,70 +1,42 @@
-version: '3.8'
-
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: reposeer-postgres
-    environment:
-      POSTGRES_DB: reposeer_db
-      POSTGRES_USER: reposeer_user
-      POSTGRES_PASSWORD: reposeer_password
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U reposeer_user -d reposeer_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    container_name: reposeer-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: reposeer-backend
-    volumes:
-      - ./backend:/app
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://reposeer_user:reposeer_password@postgres:5432/reposeer_db
-      - REDIS_URL=redis://redis:6379/0
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      REPOSEER_CORS_ORIGINS: ${REPOSEER_CORS_ORIGINS:-http://localhost:3001}
+      REPOSEER_MAX_ARCHIVE_SIZE_MB: ${REPOSEER_MAX_ARCHIVE_SIZE_MB:-50}
+      REPOSEER_MAX_EXTRACTED_SIZE_MB: ${REPOSEER_MAX_EXTRACTED_SIZE_MB:-250}
+      REPOSEER_MAX_ARCHIVE_FILES: ${REPOSEER_MAX_ARCHIVE_FILES:-10000}
+      REPOSEER_JOB_TTL_SECONDS: ${REPOSEER_JOB_TTL_SECONDS:-3600}
+      REPOSEER_MAX_JOBS: ${REPOSEER_MAX_JOBS:-100}
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: reposeer-frontend
-    volumes:
-      - ./frontend:/app
-      - /app/.next
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_MAX_ARCHIVE_SIZE_MB: ${REPOSEER_MAX_ARCHIVE_SIZE_MB:-50}
     ports:
       - "3001:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
-      - backend
-
-volumes:
-  postgres_data:
-  redis_data:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped

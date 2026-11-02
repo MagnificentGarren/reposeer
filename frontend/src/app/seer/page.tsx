@@ -7,6 +7,9 @@ import { useRouter } from "next/navigation";
 import { submitAnalysis } from "@/lib/api";
 import OrbLoader from "@/components/OrbLoader";
 import { startNewRepositorySession } from "@/lib/session";
+import { MAX_ARCHIVE_SIZE_BYTES } from "@/lib/config";
+
+const MAX_ARCHIVE_SIZE_MB = MAX_ARCHIVE_SIZE_BYTES / (1024 * 1024);
 
 export default function SeerHubPage() {
   const router = useRouter();
@@ -62,9 +65,9 @@ export default function SeerHubPage() {
         return false;
       }
 
-      if (file.size > 50 * 1024 * 1024) {
+      if (file.size > MAX_ARCHIVE_SIZE_BYTES) {
         clearSelectedFile();
-        setValidationError("This ZIP is too large. Reposeer accepts archives under 50MB. Please compress it or use a GitHub repository instead.");
+        setValidationError(`This ZIP is too large. Reposeer accepts archives up to ${MAX_ARCHIVE_SIZE_MB}MB. Please compress it or use a GitHub repository instead.`);
         return false;
       }
     }
@@ -101,9 +104,9 @@ export default function SeerHubPage() {
       setTimeout(() => {
         router.push("/seer/results");
       }, 400);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Analysis pipeline error:", err);
-      const message = err?.message || "Failed to complete analysis pipeline.";
+      const message = err instanceof Error ? err.message : "Failed to complete analysis pipeline.";
       setValidationError(message);
       if (activeTab === "github") {
         setRepoUrl("");
@@ -198,7 +201,7 @@ export default function SeerHubPage() {
                 <h3 className="mb-2 font-bold uppercase tracking-wider text-emerald-300">Accepted</h3>
                 <ul className="space-y-1.5 text-slate-300">
                   <li>Public GitHub repository links</li>
-                  <li>ZIP archives under 50MB</li>
+                  <li>ZIP archives up to {MAX_ARCHIVE_SIZE_MB}MB</li>
                   <li>At least one Python (.py) file</li>
                 </ul>
               </div>
@@ -281,9 +284,9 @@ export default function SeerHubPage() {
                           clearSelectedFile();
                           setValidationError("This file must be a ZIP archive (.zip). Please choose a valid project archive.");
                         }
-                        if (nextFile && nextFile.size > 50 * 1024 * 1024) {
+                        if (nextFile && nextFile.size > MAX_ARCHIVE_SIZE_BYTES) {
                           clearSelectedFile();
-                          setValidationError("This ZIP is too large. Reposeer accepts archives under 50MB. Please compress it or use a GitHub repository instead.");
+                          setValidationError(`This ZIP is too large. Reposeer accepts archives up to ${MAX_ARCHIVE_SIZE_MB}MB. Please compress it or use a GitHub repository instead.`);
                         }
                       }}
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -296,7 +299,7 @@ export default function SeerHubPage() {
                         {file ? file.name : "Drag and drop project ZIP here, or click to browse"}
                       </p>
                       <p className="text-slate-500 text-xs">
-                        Max archive size: 50MB (.zip formats only)
+                        Max archive size: {MAX_ARCHIVE_SIZE_MB}MB (.zip formats only)
                       </p>
                     </div>
                   </div>

@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE_URL, MAX_ARCHIVE_SIZE_BYTES, REQUEST_TIMEOUT_MS } from "@/lib/config";
 
 interface AnalysisInput {
   repoUrl?: string;
@@ -36,8 +36,8 @@ function validateZipFile(file: File): File {
     throw new Error("The uploaded file must be a ZIP archive (.zip). Please choose a valid project archive.");
   }
 
-  if (file.size > 50 * 1024 * 1024) {
-    throw new Error("The ZIP archive is too large. Please upload a file smaller than 50MB.");
+  if (file.size > MAX_ARCHIVE_SIZE_BYTES) {
+    throw new Error(`The ZIP archive is too large. Please upload a file no larger than ${MAX_ARCHIVE_SIZE_BYTES / (1024 * 1024)}MB.`);
   }
 
   return file;
@@ -51,29 +51,41 @@ function buildPythonRequiredMessage(source: "GitHub" | "ZIP") {
   return "Analysis requires at least one Python file in the uploaded archive. Please upload a ZIP that contains Python source files, not just documentation or non-Python assets.";
 }
 
-export async function submitAnalysis(data: AnalysisInput): Promise<any> {
+export async function submitAnalysis(data: AnalysisInput): Promise<unknown> {
   let response: Response;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  // 1. Dispatch initial job creation request
-  if (data.repoUrl) {
-    const repoUrl = validateGithubUrl(data.repoUrl);
-    response = await fetch(`${API_BASE_URL}/api/inspect/github`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ repo_url: repoUrl }),
-    });
-  } else if (data.file) {
-    const file = validateZipFile(data.file);
-    const formData = new FormData();
-    formData.append("file", file);
-    response = await fetch(`${API_BASE_URL}/api/inspect/upload`, {
-      method: "POST",
-      body: formData,
-    });
-  } else {
-    throw new Error("Please provide either a GitHub repository URL or a ZIP file.");
+  try {
+    if (data.repoUrl) {
+      const repoUrl = validateGithubUrl(data.repoUrl);
+      response = await fetch(`${API_BASE_URL}/api/inspect/github`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ repo_url: repoUrl }),
+        signal: controller.signal,
+      });
+    } else if (data.file) {
+      const file = validateZipFile(data.file);
+      const formData = new FormData();
+      formData.append("file", file);
+      response = await fetch(`${API_BASE_URL}/api/inspect/upload`, {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+    } else {
+      throw new Error("Please provide either a GitHub repository URL or a ZIP file.");
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("The upload request timed out. Check your connection and try again.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 
   if (!response.ok) {
@@ -106,7 +118,7 @@ export async function submitAnalysis(data: AnalysisInput): Promise<any> {
           const message = payload.message || "Inspection job encountered an error on the server.";
           reject(new Error(message.toLowerCase().includes("requires at least one python file") ? buildPythonRequiredMessage(data.repoUrl ? "GitHub" : "ZIP") : message));
         }
-      } catch (err) {
+      } catch {
         eventSource.close();
         reject(new Error("Failed to parse event stream payload."));
       }

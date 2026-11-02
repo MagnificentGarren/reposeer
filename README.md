@@ -323,8 +323,6 @@ Repository
 
 ## 🗄️ Infrastructure
 
-* **PostgreSQL**
-* **Redis**
 * **Docker Compose**
 
 ---
@@ -387,21 +385,24 @@ Before running Reposeer locally, make sure you have:
 
 # 🔐 Environment Variables
 
-Create a `.env` file in the repository root:
+Copy the example configuration to `.env` in the repository root:
 
-```env
-GEMINI_API_KEY=your_gemini_api_key
+```powershell
+Copy-Item .env.example .env
 ```
 
-For local frontend development, you can optionally create:
+Set `GEMINI_API_KEY` in `.env` to enable chat and interview features. The app can start without it, but those AI endpoints will return a clear configuration error. Set `NEXT_PUBLIC_API_URL` to the URL the user's browser can reach; it is embedded in the frontend image at build time. Set `REPOSEER_CORS_ORIGINS` to a comma-separated allowlist of frontend origins.
 
-```text
-frontend/.env.local
-```
-
-```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
+| Setting | Purpose | Default |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | Google Gemini key for chat and interview features | unset |
+| `NEXT_PUBLIC_API_URL` | Browser-visible backend URL; requires rebuilding the frontend image when changed | `http://localhost:8000` |
+| `REPOSEER_CORS_ORIGINS` | Comma-separated exact frontend origins allowed by the backend | local frontend origins |
+| `REPOSEER_MAX_ARCHIVE_SIZE_MB` | Maximum ZIP upload size; shared with the frontend image build | `50` |
+| `REPOSEER_MAX_EXTRACTED_SIZE_MB` | Maximum expanded ZIP size | `250` |
+| `REPOSEER_MAX_ARCHIVE_FILES` | Maximum number of files in an uploaded ZIP | `10000` |
+| `REPOSEER_JOB_TTL_SECONDS` | Retention window for completed analysis jobs and temporary directories | `3600` |
+| `REPOSEER_MAX_JOBS` | Maximum retained in-memory jobs | `100` |
 
 ⚠️ **Never commit API keys, credentials, or other secrets to GitHub.**
 
@@ -409,14 +410,9 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 # 🐳 Run with Docker
 
-Docker Compose can start the:
+The Compose configuration builds and runs the frontend and backend in production mode. It intentionally does not start PostgreSQL or Redis; the current app does not use either service.
 
-* 🖥️ Frontend
-* ⚙️ Backend
-* 🐘 PostgreSQL
-* 🔴 Redis
-
-Run:
+After configuring `.env`, build and start both services:
 
 ```bash
 docker compose up --build
@@ -440,16 +436,16 @@ http://localhost:8000
 http://localhost:8000/docs
 ```
 
+### Health checks
+
+The backend responds at `http://localhost:8000/health`. Compose waits for the backend health check before starting the frontend and reports health for both services.
+
+The backend keeps inspection jobs in process memory, so the production server runs one worker and should run as a single backend replica. Use a persistent job queue/store before scaling it horizontally. For deployment behind a reverse proxy, allow request bodies up to the configured ZIP limit plus multipart overhead, and preserve long-lived responses from `/api/inspect/stream/` and `/api/seer/chat`.
+
 ### Stop the application
 
 ```bash
 docker compose down
-```
-
-### Remove persistent volumes
-
-```bash
-docker compose down -v
 ```
 
 ---
@@ -529,6 +525,7 @@ http://localhost:3000
 | Method | Endpoint                           | Purpose                             |
 | ------ | ---------------------------------- | ----------------------------------- |
 | `GET`  | `/`                                | Backend health response             |
+| `GET`  | `/health`                          | Container health check               |
 | `POST` | `/api/inspect/github`              | Analyse a public GitHub repository  |
 | `POST` | `/api/inspect/upload`              | Analyse an uploaded ZIP archive     |
 | `GET`  | `/api/inspect/stream/{job_id}`     | Stream inspection progress          |
@@ -620,10 +617,10 @@ Some important considerations when running Reposeer:
 
 * 🔑 Never commit `.env` files or API keys.
 * 📦 ZIP uploads must contain Python source files.
-* 📏 ZIP uploads are limited to 50 MB.
+* 📏 ZIP uploads default to 50 MB and can be configured with `REPOSEER_MAX_ARCHIVE_SIZE_MB`.
 * 🧠 Analysis jobs are currently stored temporarily in memory.
 * 🐙 GitHub ingestion currently supports public repositories.
-* 🌐 Review CORS configuration before public deployment.
+* 🌐 Configure `REPOSEER_CORS_ORIGINS` for the deployed frontend origin; wildcard origins are rejected.
 * 🔐 Authentication and rate limiting should be added before exposing the API to untrusted users.
 
 ---
@@ -638,7 +635,7 @@ Current limitations include:
 * Static analysis primarily focuses on Python.
 * Analysis job state is held in memory.
 * AI functionality requires a configured Gemini API key.
-* Production deployment configuration is not currently included.
+* No persistent job store, authentication, or rate limiting is included.
 
 ---
 
