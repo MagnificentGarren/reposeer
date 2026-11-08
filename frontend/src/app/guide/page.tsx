@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import PublicFooter from "@/components/PublicFooter";
 import {
   ArrowDown,
   ArrowRight,
@@ -217,7 +218,7 @@ export default function GuidePage() {
         </div>
       )}
 
-      <footer className="border-t border-emerald-950/40 py-8 text-center font-mono text-xs text-slate-600">REPOSEER / USER GUIDE</footer>
+      <PublicFooter />
     </div>
   );
 }

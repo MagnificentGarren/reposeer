@@ -14,7 +14,8 @@ import {
   Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { clearReposeerSession, readReposeerSession } from "@/lib/session";
+import { clearReposeerSession, readReposeerSession, startNewRepositorySession } from "@/lib/session";
+import { getSavedReport } from "@/lib/api";
 
 // Comprehensive property extractor for node/file labels
 const extractString = (val: any, fallback = ""): string => {
@@ -41,6 +42,7 @@ const extractString = (val: any, fallback = ""): string => {
 export default function SeerResultsPage() {
   const router = useRouter();
   const [report, setReport] = useState<any>(null);
+  const [reportLoadError, setReportLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"graph" | "ast">("graph");
   const [exitTarget, setExitTarget] = useState<"/" | "/seer" | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
@@ -49,89 +51,104 @@ export default function SeerResultsPage() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const storedSession = readReposeerSession();
-      if (storedSession?.report) {
-        try {
-          const parsed = storedSession.report;
+    let cancelled = false;
+    const loadReport = async () => {
+      try {
+        const reportId = new URLSearchParams(window.location.search).get("report_id");
+        let parsed = readReposeerSession()?.report;
+        if (reportId) {
+          const savedReport = await getSavedReport(reportId);
+          if (!savedReport.result || typeof savedReport.result !== "object") {
+            throw new Error("The saved report has an invalid format.");
+          }
+          parsed = { ...savedReport.result, id: savedReport.id };
+          startNewRepositorySession(parsed);
+        }
+        if (!parsed || cancelled) return;
+        setReport(parsed);
 
-          setReport(parsed);
+        const graphData =
+          parsed.dependency_graph || parsed.graph_data || parsed.graph || {};
 
-          const graphData =
-            parsed.dependency_graph || parsed.graph_data || parsed.graph || {};
+        let rawNodes = graphData.nodes || [];
+        let rawEdges = graphData.edges || graphData.links || [];
 
-          let rawNodes = graphData.nodes || [];
-          let rawEdges = graphData.edges || graphData.links || [];
+        if (typeof rawNodes === "object" && !Array.isArray(rawNodes)) {
+          rawNodes = Object.entries(rawNodes).map(([key, val]) => ({
+            id: key,
+            label: key,
+            ...(typeof val === "object" ? val : {}),
+          }));
+        }
 
-          if (typeof rawNodes === "object" && !Array.isArray(rawNodes)) {
-            rawNodes = Object.entries(rawNodes).map(([key, val]) => ({
+        if (!rawNodes.length && (parsed.ast_summary || parsed.files)) {
+          const files = parsed.ast_summary || parsed.files;
+          if (Array.isArray(files)) {
+            rawNodes = files;
+          } else if (typeof files === "object" && files !== null) {
+            rawNodes = Object.entries(files).map(([key, val]) => ({
               id: key,
               label: key,
               ...(typeof val === "object" ? val : {}),
             }));
           }
+        }
 
-          if (!rawNodes.length && (parsed.ast_summary || parsed.files)) {
-            const files = parsed.ast_summary || parsed.files;
-            if (Array.isArray(files)) {
-              rawNodes = files;
-            } else if (typeof files === "object" && files !== null) {
-              rawNodes = Object.entries(files).map(([key, val]) => ({
-                id: key,
-                label: key,
-                ...(typeof val === "object" ? val : {}),
-              }));
-            }
-          }
+        const mappedNodes: Node[] = rawNodes.map((n: any, idx: number) => {
+          const nodeId = extractString(n, `node-${idx}`);
+          const displayLabel = extractString(n, `Node ${idx}`);
 
-          const mappedNodes: Node[] = rawNodes.map((n: any, idx: number) => {
-            const nodeId = extractString(n, `node-${idx}`);
-            const displayLabel = extractString(n, `Node ${idx}`);
+          const cols = 3;
+          const x = (idx % cols) * 280 + 80;
+          const y = Math.floor(idx / cols) * 140 + 80;
 
-            const cols = 3;
-            const x = (idx % cols) * 280 + 80;
-            const y = Math.floor(idx / cols) * 140 + 80;
+          return {
+            id: nodeId,
+            position: n.position || { x, y },
+            data: { label: displayLabel, raw: n },
+            style: {
+              background: "rgba(2, 44, 34, 0.9)",
+              color: "#6ee7b7",
+              border: "1px solid rgba(16, 185, 129, 0.4)",
+              borderRadius: "12px",
+              padding: "10px 16px",
+              fontSize: "12px",
+              fontWeight: "600",
+              backdropFilter: "blur(8px)",
+              boxShadow: "0 0 20px rgba(16, 185, 129, 0.15)",
+              cursor: "pointer",
+            },
+          };
+        });
 
-            return {
-              id: nodeId,
-              position: n.position || { x, y },
-              data: { label: displayLabel, raw: n },
-              style: {
-                background: "rgba(2, 44, 34, 0.9)",
-                color: "#6ee7b7",
-                border: "1px solid rgba(16, 185, 129, 0.4)",
-                borderRadius: "12px",
-                padding: "10px 16px",
-                fontSize: "12px",
-                fontWeight: "600",
-                backdropFilter: "blur(8px)",
-                boxShadow: "0 0 20px rgba(16, 185, 129, 0.15)",
-                cursor: "pointer",
-              },
-            };
-          });
+        const mappedEdges: Edge[] = rawEdges.map((e: any, idx: number) => {
+          const source = extractString(e.source, String(e.source));
+          const target = extractString(e.target, String(e.target));
 
-          const mappedEdges: Edge[] = rawEdges.map((e: any, idx: number) => {
-            const source = extractString(e.source, String(e.source));
-            const target = extractString(e.target, String(e.target));
+          return {
+            id: `e-${idx}`,
+            source,
+            target,
+            animated: true,
+            style: { stroke: "#10b981", strokeWidth: 2 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: "#10b981" },
+          };
+        });
 
-            return {
-              id: `e-${idx}`,
-              source,
-              target,
-              animated: true,
-              style: { stroke: "#10b981", strokeWidth: 2 },
-              markerEnd: { type: MarkerType.ArrowClosed, color: "#10b981" },
-            };
-          });
-
+        if (!cancelled) {
           setNodes(mappedNodes);
           setEdges(mappedEdges);
-        } catch (e) {
-          console.error("Failed to parse report session data:", e);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setReportLoadError(error instanceof Error ? error.message : "Unable to load this report.");
         }
       }
-    }
+    };
+    void loadReport();
+    return () => {
+      cancelled = true;
+    };
   }, [setNodes, setEdges]);
 
   const astSummary = useMemo(() => {
@@ -181,13 +198,16 @@ export default function SeerResultsPage() {
         <div className="text-center space-y-4 max-w-md bg-emerald-950/20 border border-emerald-500/30 p-8 rounded-3xl backdrop-blur-md shadow-[0_0_30px_rgba(16,185,129,0.1)]">
           <h2 className="text-2xl font-bold text-emerald-400 tracking-tight">No Report Context Found</h2>
           <p className="text-slate-400 text-sm">
-            Run an analysis from the Seer hub to populate architectural metrics.
+            {reportLoadError || "Run an analysis from the Seer hub or choose a saved report to populate architectural metrics."}
           </p>
           <Link
             href="/seer"
             className="inline-block px-6 py-3 bg-emerald-500 text-slate-950 font-bold rounded-xl text-sm hover:bg-emerald-400 transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)]"
           >
             Go to Seer Hub
+          </Link>
+          <Link href="/seer/reports" className="ml-3 text-sm font-semibold text-emerald-400 hover:text-emerald-300">
+            Saved reports
           </Link>
         </div>
       </div>

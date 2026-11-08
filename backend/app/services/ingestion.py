@@ -18,9 +18,9 @@ def _positive_int_from_env(name: str, default: int) -> int:
     return parsed_value
 
 
-MAX_ARCHIVE_SIZE_BYTES = _positive_int_from_env("REPOSEER_MAX_ARCHIVE_SIZE_MB", 50) * 1024 * 1024
-MAX_EXTRACTED_SIZE_BYTES = _positive_int_from_env("REPOSEER_MAX_EXTRACTED_SIZE_MB", 250) * 1024 * 1024
-MAX_ARCHIVE_FILES = _positive_int_from_env("REPOSEER_MAX_ARCHIVE_FILES", 10000)
+MAX_ARCHIVE_SIZE_BYTES = _positive_int_from_env("REPOSEER_MAX_ARCHIVE_SIZE_MB", 25) * 1024 * 1024
+MAX_EXTRACTED_SIZE_BYTES = _positive_int_from_env("REPOSEER_MAX_EXTRACTED_SIZE_MB", 100) * 1024 * 1024
+MAX_ARCHIVE_FILES = _positive_int_from_env("REPOSEER_MAX_ARCHIVE_FILES", 2000)
 
 
 class IngestionService:
@@ -118,7 +118,7 @@ class IngestionService:
             and temp_path.name.startswith(("reposeer_repo_", "reposeer_upload_"))
         )
         if temp_path.exists() and is_reposeer_temp:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            shutil.rmtree(temp_path)
 
     @staticmethod
     def cleanup_expired_temp_dirs(max_age_seconds: int) -> None:

@@ -1,10 +1,11 @@
 import os
 import re
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 from app.services.auth import get_current_user
+from app.services.database import DatabaseStore, get_database_store, hash_client_ip
 
 router = APIRouter()
 
@@ -60,8 +61,15 @@ def clean_generated_question(text: str) -> str:
 @router.post("/generate-question")
 async def generate_interview_question(
     payload: QuestionGenerateRequest,
+    request: Request,
     user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
 ):
+    await store.consume_ai_action(
+        user["id"],
+        hash_client_ip(request.client.host if request.client else None),
+        "interview_generate",
+    )
     context = payload.report_context or {}
     ast_summary = context.get("ast_summary") or []
     repository_files = context.get("repository_files") or []
@@ -129,8 +137,15 @@ async def generate_interview_question(
 @router.post("/evaluate")
 async def evaluate_candidate_response(
     payload: EvaluateResponseRequest,
+    request: Request,
     user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
 ):
+    await store.consume_ai_action(
+        user["id"],
+        hash_client_ip(request.client.host if request.client else None),
+        "interview_evaluate",
+    )
     system_instruction = (
         "You are Reposeer Technical Assessor. Evaluate the candidate's interview response on a technical scale of 0-100.\n"
         "Provide constructive feedback using standard UK English spelling (e.g., analyse, organisation, optimisation).\n"

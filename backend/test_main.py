@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main
+from app.services.auth import get_current_user
 from app.services.ingestion import _positive_int_from_env
 
 
@@ -11,6 +12,21 @@ def test_health_endpoint():
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "Reposeer Backend"}
+
+
+def test_persistent_endpoint_reports_missing_database_configuration(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    main.app.dependency_overrides[get_current_user] = lambda: {
+        "id": "00000000-0000-0000-0000-000000000001"
+    }
+    try:
+        with TestClient(main.app) as client:
+            response = client.get("/api/inspect/reports")
+    finally:
+        main.app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 503
+    assert "Database persistence is not configured" in response.json()["detail"]
 
 
 def test_cors_allows_configured_origin_only():

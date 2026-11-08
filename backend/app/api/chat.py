@@ -1,10 +1,11 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from google import genai
 from google.genai import types
 from app.models.schemas import SeerChatRequest
 from app.services.auth import get_current_user
+from app.services.database import DatabaseStore, get_database_store, hash_client_ip
 
 router = APIRouter()
 
@@ -23,11 +24,18 @@ def get_gemini_client() -> genai.Client:
 @router.post("/chat")
 async def seer_casual_chat(
     payload: SeerChatRequest,
+    request: Request,
     user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
 ):
     if not payload.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
+    await store.consume_ai_action(
+        user["id"],
+        hash_client_ip(request.client.host if request.client else None),
+        "chat",
+    )
     gemini_client = get_gemini_client()
     context = payload.report_context or {}
 

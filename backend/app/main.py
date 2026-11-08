@@ -1,4 +1,6 @@
 import os
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -15,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.api import chat, inspect, interview
+from app.services.database import create_database_pool, run_database_maintenance, DatabaseStore
 from app.services.ingestion import MAX_ARCHIVE_SIZE_BYTES
 
 
@@ -46,17 +49,44 @@ def _configured_cors_origins() -> list[str]:
 
 MAX_REQUEST_SIZE_BYTES = MAX_ARCHIVE_SIZE_BYTES + 1024 * 1024
 
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    database_url = os.getenv("DATABASE_URL")
+    application.state.database_pool = (
+        await create_database_pool(database_url) if database_url else None
+    )
+    maintenance_task = None
+    if application.state.database_pool is not None:
+        store = DatabaseStore(application.state.database_pool)
+        await store.prune_expired()
+        maintenance_task = asyncio.create_task(
+            run_database_maintenance(store)
+        )
+    try:
+        yield
+    finally:
+        if maintenance_task is not None:
+            maintenance_task.cancel()
+            try:
+                await maintenance_task
+            except asyncio.CancelledError:
+                pass
+        if application.state.database_pool is not None:
+            await application.state.database_pool.close()
+
+
 app = FastAPI(
     title="Reposeer Studio API",
     description="AST parsing, dependency graph analysis, and LLM codebase evaluation.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_configured_cors_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 

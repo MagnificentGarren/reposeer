@@ -1,6 +1,6 @@
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
 
-const archiveSizeMb = Number(process.env.NEXT_PUBLIC_MAX_ARCHIVE_SIZE_MB || "50");
+const archiveSizeMb = Number(process.env.NEXT_PUBLIC_MAX_ARCHIVE_SIZE_MB || "25");
 if (!Number.isSafeInteger(archiveSizeMb) || archiveSizeMb <= 0) {
   throw new Error("NEXT_PUBLIC_MAX_ARCHIVE_SIZE_MB must be a positive whole number.");
 }

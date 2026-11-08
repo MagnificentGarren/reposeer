@@ -22,6 +22,7 @@ import {
 } from "@/lib/session";
 import { API_BASE_URL } from "@/lib/config";
 import { getAuthorizationHeaders } from "@/lib/supabase";
+import { apiErrorMessage } from "@/lib/api";
 
 type Difficulty = "Easy" | "Medium" | "Hard";
 
@@ -125,7 +126,7 @@ export default function SeerInterviewPage() {
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Unable to generate an interview scenario. Please try again.");
+        throw new Error(apiErrorMessage(errorData, "Unable to generate an interview scenario. Please try again."));
       }
       const data: QuestionData = await res.json();
       setQuestionData(data);
@@ -209,7 +210,7 @@ export default function SeerInterviewPage() {
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Unable to evaluate your answer. Please try again.");
+        throw new Error(apiErrorMessage(errorData, "Unable to evaluate your answer. Please try again."));
       }
       const data: EvaluationResult = await res.json();
       setEvaluationResult(data);

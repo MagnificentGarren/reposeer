@@ -93,7 +93,7 @@ Working with a local Python project?
 
 Upload it as a ZIP archive.
 
-The current upload flow requires the archive to contain Python source code and limits uploads to **50 MB**.
+The current upload flow requires the archive to contain Python source code and limits uploads to **25 MB**.
 
 ![Local Project Upload](frontend/public/guide/02-seer-hub-upload.png)
 
@@ -391,22 +391,28 @@ Copy the example configuration to `.env` in the repository root:
 Copy-Item .env.example .env
 ```
 
-Set the Supabase project URL and public anon key in both the server-only and `NEXT_PUBLIC_` settings below. Google sign-in also requires the dashboard configuration described in [Google and Supabase OAuth setup](#-google-and-supabase-oauth-setup). Set `GEMINI_API_KEY` for chat and interview AI. `NEXT_PUBLIC_API_URL` is the URL the user's browser can reach; it is embedded in the frontend image at build time. Set `REPOSEER_CORS_ORIGINS` to a comma-separated allowlist of frontend origins.
+Set the Supabase project URL and public anon key in both the server-only and `NEXT_PUBLIC_` settings below. Google sign-in also requires the dashboard configuration described in [Google and Supabase OAuth setup](#-google-and-supabase-oauth-setup). Set `GEMINI_API_KEY` for chat and interview AI. `NEXT_PUBLIC_API_URL` is the URL the user's browser can reach; it is embedded in the frontend image at build time. Set `REPOSEER_CORS_ORIGINS` to a comma-separated allowlist of frontend origins. Docker Compose starts PostgreSQL locally; for a hosted deployment, set `DATABASE_URL` to the private PostgreSQL connection string in the backend dashboard.
 
 | Setting | Purpose | Default |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | Google Gemini key for chat and interview features | unset |
 | `SUPABASE_URL` | Supabase project URL used by the backend to verify access tokens | unset |
 | `SUPABASE_ANON_KEY` | Supabase public anon key sent to the Auth user-verification endpoint | unset |
+| `DATABASE_URL` | PostgreSQL connection string used for reports, jobs, and usage data; Compose supplies its local database when unset | Compose local database |
+| `REPOSEER_RATE_LIMIT_HMAC_KEY` | Optional stable secret for hashing client IPs in usage records; defaults to a key derived from `DATABASE_URL` | derived |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Local Compose database settings only; choose a strong local password | local defaults |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase URL used by the frontend auth client | unset |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase public anon key used by the frontend auth client; safe to expose | unset |
 | `NEXT_PUBLIC_API_URL` | Browser-visible backend URL; requires rebuilding the frontend image when changed | `http://localhost:8000` |
 | `REPOSEER_CORS_ORIGINS` | Comma-separated exact frontend origins allowed by the backend | local frontend origins |
-| `REPOSEER_MAX_ARCHIVE_SIZE_MB` | Maximum ZIP upload size; shared with the frontend image build | `50` |
-| `REPOSEER_MAX_EXTRACTED_SIZE_MB` | Maximum expanded ZIP size | `250` |
-| `REPOSEER_MAX_ARCHIVE_FILES` | Maximum number of files in an uploaded ZIP | `10000` |
-| `REPOSEER_JOB_TTL_SECONDS` | Retention window for completed analysis jobs and temporary directories | `3600` |
-| `REPOSEER_MAX_JOBS` | Maximum retained in-memory jobs | `100` |
+| `REPOSEER_MAX_ARCHIVE_SIZE_MB` | Maximum ZIP upload size; shared with the frontend image build | `25` |
+| `REPOSEER_MAX_EXTRACTED_SIZE_MB` | Maximum expanded ZIP size | `100` |
+| `REPOSEER_MAX_ARCHIVE_FILES` | Maximum number of files in an uploaded ZIP | `2000` |
+| `REPOSEER_REPORT_RETENTION_DAYS` | Report retention period; expired reports are deleted automatically | `7` |
+
+The initial invited-beta quotas are **3 analyses per day and 20 per month per account**, **1 concurrent analysis**, and **10 AI actions per day and 100 per month per account**. Shared IP limits are **10 analyses per day and 100 per month**, plus **30 AI actions per day and 300 per month**. A ZIP is limited to 25 MB compressed, 100 MB extracted, and 2,000 files. Limits are enforced by the API and rejected requests return HTTP 429 with a quota-specific message. Quota usage is written transactionally before work starts; unsuccessful provider or analysis attempts still count.
+
+Analysis archives and Git checkouts are temporary and removed after analysis. Reports, including repository excerpts used for the AI context, are private to the verified account and retained for 7 days by default. Users can review and delete their saved reports from **Seer Hub → View saved reports**. Usage records keep account IDs and keyed IP hashes for up to 13 months for quota enforcement and operational monitoring.
 
 ⚠️ **Never commit API keys, credentials, or other secrets to GitHub.**
 
@@ -436,18 +442,19 @@ The browser signs in with Google through Supabase Auth. The backend verifies eac
    ```
 
    Replace the staging and production examples with the real origins. Include only environments you control.
-7. **Set local configuration.** In the repository root `.env`, set `SUPABASE_URL` and `SUPABASE_ANON_KEY` for the backend. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_API_URL=http://localhost:8000` for the frontend. Docker Compose passes these frontend settings into the build. When running Next.js directly from `frontend`, also create `frontend/.env.local` with those three `NEXT_PUBLIC_` settings because Next.js loads environment files from the frontend project directory. Allow both development origins in the backend with `REPOSEER_CORS_ORIGINS=http://localhost:3000,http://localhost:3001`.
-8. **Set deployed configuration.** In the backend deployment, set `SUPABASE_URL` and `SUPABASE_ANON_KEY`. In the frontend build environment, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`, plus `NEXT_PUBLIC_API_URL`. Configure `REPOSEER_CORS_ORIGINS` on the backend to include the exact frontend origin (scheme, host, and port; no path or wildcard). Rebuild the frontend after changing `NEXT_PUBLIC_` values.
+7. **Set local configuration.** In the repository root `.env`, set `SUPABASE_URL` and `SUPABASE_ANON_KEY` for the backend. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_API_URL=http://localhost:8000` for the frontend. Docker Compose starts PostgreSQL and applies checked-in migrations automatically; leave `DATABASE_URL` blank to use that local service. Docker Compose passes the frontend settings into the build. When running Next.js directly from `frontend`, also create `frontend/.env.local` with those three `NEXT_PUBLIC_` settings because Next.js loads environment files from the frontend project directory. Allow both development origins in the backend with `REPOSEER_CORS_ORIGINS=http://localhost:3000,http://localhost:3001`.
+8. **Set deployed configuration.** In the backend deployment, set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and a private PostgreSQL `DATABASE_URL` with TLS enabled. Use a dedicated `REPOSEER_RATE_LIMIT_HMAC_KEY` so IP-rate hashes remain stable if the database password rotates. In the frontend build environment, set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_API_URL`. Configure `REPOSEER_CORS_ORIGINS` on the backend to include the exact frontend origin (scheme, host, and port; no path or wildcard). Rebuild the frontend after changing `NEXT_PUBLIC_` values. The backend applies pending migrations at startup; do not expose the database administrative credentials to the browser.
 9. **Configure Google's consent screen.** Supply the app name, support email, developer contact, and requested scopes (`openid`, `email`, and `profile` are sufficient for this sign-in). Add a homepage, privacy policy, and terms URL if Google requires them for the selected publishing status. While the consent screen is in testing, add each test user's Google account to the test-user list. Move the app to production when ready; Google may require domain verification or OAuth verification depending on the scopes and usage.
-10. **Restart and verify.** Run `docker compose up --build` (or restart the local frontend and backend). Open the site, choose **Sign in with Google**, complete the Google consent flow, and return to the app. Start an analysis and try chat or interview mode. A signed-out request or invalid/expired token should receive HTTP 401; the analysis progress stream is visible only to the account that started it.
+10. **Confirm retention and privacy wording.** Before inviting users, confirm whether the 7-day report retention is acceptable and publish privacy-notice text explaining that report data (including repository excerpts) and quota/usage records are stored server-side. The current backend default is 7 days; change `REPOSEER_REPORT_RETENTION_DAYS` only after deciding and updating the notice.
+11. **Restart and verify.** Run `docker compose up --build` (or restart the local frontend and backend). Open the site, choose **Sign in with Google**, complete the Google consent flow, and return to the app. Start an analysis and try chat or interview mode. Confirm that your report appears under **View saved reports**, can be reopened and deleted, and that another account cannot read it. A signed-out request or invalid/expired token should receive HTTP 401; the analysis progress stream is visible only to the account that started it.
 
-The public home, About, and Guide pages remain available without signing in. Reports and chat history are currently kept in the browser's session storage, not synced to an account; temporary server-side analysis jobs are in-memory and scoped to their verified owner.
+The public home, About, and Guide pages remain available without signing in. Analysis jobs, reports, and usage records are stored in PostgreSQL. Browser session storage continues to hold the active report copy and conversational UI state; it is not the durable report store.
 
 ---
 
 # 🐳 Run with Docker
 
-The Compose configuration builds and runs the frontend and backend in production mode. It intentionally does not start PostgreSQL or Redis; the current app does not use either service.
+The Compose configuration builds the frontend and backend and starts PostgreSQL for durable jobs, reports, and usage data. Redis is not currently used.
 
 After configuring `.env`, build and start both services:
 
@@ -658,7 +665,7 @@ Some important considerations when running Reposeer:
 
 * 🔑 Never commit `.env` files or API keys.
 * 📦 ZIP uploads must contain Python source files.
-* 📏 ZIP uploads default to 50 MB and can be configured with `REPOSEER_MAX_ARCHIVE_SIZE_MB`.
+* 📏 ZIP uploads default to 25 MB and can be configured with `REPOSEER_MAX_ARCHIVE_SIZE_MB`.
 * 🧠 Analysis jobs are currently stored temporarily in memory.
 * 🐙 GitHub ingestion currently supports public repositories.
 * 🌐 Configure `REPOSEER_CORS_ORIGINS` for the deployed frontend origin; wildcard origins are rejected.

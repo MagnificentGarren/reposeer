@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PublicFooter from "@/components/PublicFooter";
 import {
   ArrowRight,
   Boxes,
@@ -182,7 +183,7 @@ export default function AboutPage() {
         </section>
       </main>
 
-      <footer className="border-t border-emerald-950/40 py-8 text-center font-mono text-xs text-slate-600">REPOSEER / ARCHITECTURE INTELLIGENCE STUDIO</footer>
+      <PublicFooter />
     </div>
   );
 }

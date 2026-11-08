@@ -194,6 +194,9 @@ export default function SeerHubPage() {
               <p className="text-slate-400 text-sm mt-2 max-w-md mx-auto">
                 Select your repo ingestion method below to generate dependency graphs and trigger AI agent reviews.
               </p>
+              <Link href="/seer/reports" className="mt-3 inline-block text-sm font-semibold text-emerald-400 hover:text-emerald-300">
+                View saved reports
+              </Link>
             </div>
 
             <div className="mb-8 grid gap-4 rounded-2xl border border-emerald-500/20 bg-slate-950/50 p-5 text-xs sm:grid-cols-2">
@@ -318,10 +321,6 @@ export default function SeerHubPage() {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="relative z-10 border-t border-emerald-950/40 py-6 text-center text-xs text-slate-600">
-        Reposeer Architecture Intelligence Studio
-      </footer>
     </div>
   );
 }

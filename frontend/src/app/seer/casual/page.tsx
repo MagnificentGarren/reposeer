@@ -13,6 +13,7 @@ import {
 import type { ChatMessage } from "@/lib/session";
 import { API_BASE_URL } from "@/lib/config";
 import { getAuthorizationHeaders } from "@/lib/supabase";
+import { apiErrorMessage } from "@/lib/api";
 
 interface RepositoryScores {
   overall?: number;
@@ -186,7 +187,7 @@ export default function SeerCasualPage() {
 
       if (!response.ok || !response.body) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Unable to start the repository assistant. Please try again.");
+        throw new Error(apiErrorMessage(errorData, "Unable to start the repository assistant. Please try again."));
       }
 
       const reader = response.body.getReader();

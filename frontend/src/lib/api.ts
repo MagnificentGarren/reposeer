@@ -7,6 +7,50 @@ interface AnalysisInput {
   onProgress?: (progress: number, message: string) => void;
 }
 
+export interface SavedReport {
+  id: string;
+  created_at: string;
+  expires_at: string;
+  files_analyzed: number;
+}
+
+export function apiErrorMessage(errorData: unknown, fallback: string): string {
+  if (!errorData || typeof errorData !== "object" || !("detail" in errorData)) return fallback;
+  const detail = errorData.detail;
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object" && "message" in detail && typeof detail.message === "string") {
+    return detail.message;
+  }
+  return fallback;
+}
+
+async function reportRequest(path: string, method = "GET"): Promise<Response> {
+  return fetch(`${API_BASE_URL}/api/inspect/reports${path}`, {
+    method,
+    headers: await getAuthorizationHeaders(),
+  });
+}
+
+export async function listSavedReports(): Promise<SavedReport[]> {
+  const response = await reportRequest("");
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(apiErrorMessage(payload, "Unable to load saved reports."));
+  return Array.isArray(payload.reports) ? payload.reports : [];
+}
+
+export async function getSavedReport(id: string): Promise<{ id: string; result: unknown }> {
+  const response = await reportRequest(`/${encodeURIComponent(id)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(apiErrorMessage(payload, "Unable to load this report."));
+  return payload;
+}
+
+export async function deleteSavedReport(id: string): Promise<void> {
+  const response = await reportRequest(`/${encodeURIComponent(id)}`, "DELETE");
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(apiErrorMessage(payload, "Unable to delete this report."));
+}
+
 function validateGithubUrl(repoUrl: string): string {
   if (!repoUrl || !repoUrl.trim()) {
     throw new Error("Please enter a GitHub repository URL.");
@@ -92,7 +136,7 @@ export async function submitAnalysis(data: AnalysisInput): Promise<unknown> {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    const detail = typeof errorData.detail === "string" ? errorData.detail : "Failed to initialize inspection task.";
+    const detail = apiErrorMessage(errorData, "Failed to initialize inspection task.");
     throw new Error(detail);
   }
 
@@ -143,7 +187,10 @@ export async function submitAnalysis(data: AnalysisInput): Promise<unknown> {
         data.onProgress(payload.progress, payload.message || "Analyzing repository...");
       }
       if (payload.status === "completed") {
-        return payload.result || payload;
+        const result = payload.result;
+        return result && typeof result === "object"
+          ? { ...result, id: job_id }
+          : { id: job_id, result };
       }
       if (payload.status === "failed") {
         const message = payload.message || "Inspection job encountered an error on the server.";

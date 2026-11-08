@@ -2,15 +2,13 @@
 
 import json
 import asyncio
-import os
+import logging
 import shutil
 import tempfile
-import time
 import uuid
 import zipfile
-from collections import OrderedDict
 from urllib.parse import urlparse
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -22,8 +20,10 @@ from app.services.ingestion import (
 from app.services.ast_parser import PythonASTParser
 from app.services.graph_mapper import DependencyGraphMapper
 from app.services.auth import get_current_user
+from app.services.database import DatabaseStore, get_database_store, hash_client_ip
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # Define Pydantic models for incoming requests
@@ -35,79 +35,80 @@ class GitHubInspectRequest(BaseModel):
     repo_url: str
 
 
-# Bounded in-memory job state store. Completed jobs only need to survive long enough
-# for the frontend to receive the final streamed event.
-JOB_TTL_SECONDS = int(os.getenv("REPOSEER_JOB_TTL_SECONDS", "3600"))
-MAX_JOBS = int(os.getenv("REPOSEER_MAX_JOBS", "100"))
-jobs: OrderedDict[str, dict] = OrderedDict()
-
-
-def _prune_jobs() -> None:
-    IngestionService.cleanup_expired_temp_dirs(JOB_TTL_SECONDS)
-    now = time.time()
-    expired_ids = [
-        job_id
-        for job_id, job in jobs.items()
-        if job.get("status") in {"completed", "failed"}
-        and now - job.get("updated_at", now) > JOB_TTL_SECONDS
-    ]
-    for job_id in expired_ids:
-        jobs.pop(job_id, None)
-
-    while len(jobs) >= MAX_JOBS:
-        oldest_id, oldest_job = next(iter(jobs.items()))
-        if oldest_job.get("status") in {"processing", "queued"}:
-            break
-        jobs.pop(oldest_id, None)
-
-
-def _set_job(job_id: str, **updates: object) -> None:
-    _prune_jobs()
-    job = {**jobs.get(job_id, {}), **updates, "updated_at": time.time()}
-    jobs.pop(job_id, None)
-    jobs[job_id] = job
-
-
-def run_analysis_task(job_id: str, repo_url: str):
+async def run_analysis_task(job_id: str, repo_url: str, store: DatabaseStore):
     ingestion = IngestionService()
     temp_dir = None
     try:
-        _set_job(job_id, status="processing", progress=20, message="Cloning GitHub repository...")
-        temp_dir = ingestion.clone_github_repo(repo_url)
-        _run_analysis_on_directory(job_id, temp_dir)
-    except Exception as e:
-        _set_job(job_id, status="failed", progress=0, message=f"Analysis failed: {str(e)}")
+        await store.update_job(
+            job_id, status="processing", progress=20, message="Cloning GitHub repository..."
+        )
+        temp_dir = await asyncio.to_thread(ingestion.clone_github_repo, repo_url)
+        report = await _run_analysis_on_directory(job_id, temp_dir, store)
+        ingestion.cleanup_temp_dir(temp_dir)
+        temp_dir = None
+        await _save_analysis_result(job_id, report, store)
+    except Exception as exc:
+        logger.exception("Analysis job %s failed", job_id)
+        await store.update_job(
+            job_id, status="failed", progress=0, message=f"Analysis failed: {str(exc)}"
+        )
     finally:
         if temp_dir:
             ingestion.cleanup_temp_dir(temp_dir)
 
 
-def run_zip_analysis_task(job_id: str, extracted_dir: str):
+async def run_zip_analysis_task(job_id: str, extracted_dir: str, store: DatabaseStore):
     ingestion = IngestionService()
     try:
-        _set_job(job_id, status="processing", progress=20, message="Extracting uploaded archive...")
-        _run_analysis_on_directory(job_id, extracted_dir)
-    except Exception as e:
-        _set_job(job_id, status="failed", progress=0, message=f"Analysis failed: {str(e)}")
+        await store.update_job(
+            job_id, status="processing", progress=20, message="Parsing uploaded archive..."
+        )
+        report = await _run_analysis_on_directory(job_id, extracted_dir, store)
+        ingestion.cleanup_temp_dir(extracted_dir)
+        extracted_dir = None
+        await _save_analysis_result(job_id, report, store)
+    except Exception as exc:
+        logger.exception("Analysis job %s failed", job_id)
+        await store.update_job(
+            job_id, status="failed", progress=0, message=f"Analysis failed: {str(exc)}"
+        )
     finally:
         if extracted_dir:
             ingestion.cleanup_temp_dir(extracted_dir)
 
 
-def _run_analysis_on_directory(job_id: str, source_dir: str):
+async def _run_analysis_on_directory(job_id: str, source_dir: str, store: DatabaseStore):
     ingestion = IngestionService()
 
-    _set_job(job_id, status="processing", progress=50, message="Parsing AST & building dependency graph...")
-    python_files = ingestion.collect_python_files(source_dir)
+    await store.update_job(
+        job_id, status="processing", progress=50, message="Parsing AST & building dependency graph..."
+    )
+    report = await asyncio.to_thread(_analyse_directory, ingestion, source_dir)
+    return report
 
-    if not python_files:
-        _set_job(
+
+async def _save_analysis_result(job_id: str, report: dict | None, store: DatabaseStore) -> None:
+    if report is None:
+        await store.update_job(
             job_id,
             status="failed",
             progress=0,
             message="Analysis requires at least one Python file in the repository or uploaded archive. Please provide Python source files for analysis.",
         )
         return
+    await store.update_job(
+        job_id,
+        status="completed",
+        progress=100,
+        message="Analysis Complete!",
+        result=report,
+    )
+
+
+def _analyse_directory(ingestion: IngestionService, source_dir: str) -> dict | None:
+    python_files = ingestion.collect_python_files(source_dir)
+    if not python_files:
+        return None
 
     parser = PythonASTParser()
     ast_data = [
@@ -118,33 +119,27 @@ def _run_analysis_on_directory(job_id: str, source_dir: str):
     mapper = DependencyGraphMapper()
     graph_metrics = mapper.build_graph(ast_data)
 
-    _set_job(job_id, status="processing", progress=80, message="Finalising structural analysis...")
-
-    _set_job(
-        job_id,
-        status="completed",
-        progress=100,
-        message="Analysis Complete!",
-        result={
-            "files_analyzed": len(python_files),
-            "ast_summary": ast_data,
-            "repository_files": [
-                {
-                    "relative_path": file["relative_path"],
-                    "code": file["code"][:12000],
-                }
-                for file in python_files[:40]
-            ],
-            "dependency_graph": graph_metrics,
-        },
-    )
+    return {
+        "files_analyzed": len(python_files),
+        "ast_summary": ast_data,
+        "repository_files": [
+            {
+                "relative_path": file["relative_path"],
+                "code": file["code"][:12000],
+            }
+            for file in python_files[:40]
+        ],
+        "dependency_graph": graph_metrics,
+    }
 
 
 @router.post("/github")
 async def inspect_github_repository(
     payload: GitHubInspectRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
     user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
 ):
     repo_url = (payload.repo_url or "").strip()
     parsed = urlparse(repo_url)
@@ -160,25 +155,19 @@ async def inspect_github_repository(
             detail="Please provide a valid GitHub repository URL, for example: https://github.com/owner/repo. Analysis requires at least one Python file in the repository.",
         )
 
-    job_id = str(uuid.uuid4())
-    _set_job(
-        job_id,
-        user_id=user["id"],
-        status="queued",
-        progress=5,
-        message="Initializing analysis pipeline...",
-    )
-
-    background_tasks.add_task(run_analysis_task, job_id, repo_url)
+    job_id = await store.create_analysis(user["id"], hash_client_ip(request.client.host if request.client else None))
+    background_tasks.add_task(run_analysis_task, job_id, repo_url, store)
 
     return {"job_id": job_id, "status": "processing"}
 
 
 @router.post("/upload")
 async def inspect_uploaded_repository(
+    request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None,
     user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
 ):
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(
@@ -186,34 +175,22 @@ async def inspect_uploaded_repository(
             detail="Please upload a ZIP archive containing the repository. Analysis requires at least one Python file in the archive.",
         )
 
-    job_id = str(uuid.uuid4())
-    _set_job(
-        job_id,
-        user_id=user["id"],
-        status="queued",
-        progress=5,
-        message="Initializing ZIP analysis pipeline...",
-    )
-
-    temp_dir = tempfile.mkdtemp(prefix="reposeer_upload_")
+    archive_size = file.file.seek(0, 2)
+    file.file.seek(0)
+    if archive_size > MAX_ARCHIVE_SIZE_BYTES:
+        limit_mb = MAX_ARCHIVE_SIZE_BYTES // (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"The uploaded ZIP is too large. The limit is {limit_mb}MB.",
+        )
 
     try:
-        archive_size = file.file.seek(0, os.SEEK_END)
-        file.file.seek(0)
-        if archive_size > MAX_ARCHIVE_SIZE_BYTES:
-            limit_mb = MAX_ARCHIVE_SIZE_BYTES // (1024 * 1024)
-            raise HTTPException(
-                status_code=413,
-                detail=f"The uploaded ZIP is too large. The limit is {limit_mb}MB.",
-            )
-
         with zipfile.ZipFile(file.file, "r") as archive:
             has_python_file = any(
                 not entry.is_dir() and entry.filename.lower().endswith(".py")
                 for entry in archive.infolist()
             )
             if not has_python_file:
-                shutil.rmtree(temp_dir, ignore_errors=True)
                 raise HTTPException(
                     status_code=400,
                     detail=(
@@ -221,42 +198,97 @@ async def inspect_uploaded_repository(
                         "Please upload a repository archive with at least one .py source file."
                     ),
                 )
-            IngestionService.extract_zip_safely(archive, temp_dir)
-    except ValueError as exc:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            job_id = await store.create_analysis(
+                user["id"], hash_client_ip(request.client.host if request.client else None)
+            )
+            temp_dir = tempfile.mkdtemp(prefix="reposeer_upload_")
+            try:
+                await asyncio.to_thread(IngestionService.extract_zip_safely, archive, temp_dir)
+            except (ValueError, zipfile.BadZipFile) as exc:
+                IngestionService.cleanup_temp_dir(temp_dir)
+                await store.update_job(
+                    job_id,
+                    status="failed",
+                    progress=0,
+                    message=f"Analysis failed: {str(exc)}",
+                )
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except OSError as exc:
+                logger.exception("Could not extract analysis archive for job %s", job_id)
+                IngestionService.cleanup_temp_dir(temp_dir)
+                await store.update_job(
+                    job_id,
+                    status="failed",
+                    progress=0,
+                    message="Analysis failed while extracting the uploaded archive.",
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="The uploaded archive could not be extracted.",
+                ) from exc
     except zipfile.BadZipFile as exc:
-        shutil.rmtree(temp_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail=f"Invalid ZIP archive: {str(exc)}") from exc
 
-    background_tasks.add_task(run_zip_analysis_task, job_id, temp_dir)
+    background_tasks.add_task(run_zip_analysis_task, job_id, temp_dir, store)
     return {"job_id": job_id, "status": "processing"}
 
 
 @router.get("/stream/{job_id}")
 async def stream_inspection_progress(
-    job_id: str,
+    job_id: uuid.UUID,
     user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
 ):
-    _prune_jobs()
-    initial_job = jobs.get(job_id)
-    if not initial_job or initial_job.get("user_id") != user["id"]:
+    job_id = str(job_id)
+    initial_job = await store.get_job(job_id, user["id"])
+    if not initial_job:
         raise HTTPException(status_code=404, detail="Analysis job not found.")
 
     async def event_generator():
         while True:
-            _prune_jobs()
-            job = jobs.get(job_id)
-            if not job or job.get("user_id") != user["id"]:
+            job = await store.get_job(job_id, user["id"])
+            if not job:
                 yield f"data: {json.dumps({'progress': 0, 'message': 'Job not found'})}\n\n"
                 break
 
-            public_job = {key: value for key, value in job.items() if key != "user_id"}
-            yield f"data: {json.dumps(public_job)}\n\n"
+            yield f"data: {json.dumps(job)}\n\n"
 
-            if public_job.get("status") in ("completed", "failed"):
+            if job.get("status") in ("completed", "failed"):
                 break
 
             await asyncio.sleep(0.5)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/reports")
+async def list_owned_reports(
+    user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
+):
+    return {"reports": await store.list_reports(user["id"])}
+
+
+@router.get("/reports/{report_id}")
+async def get_owned_report(
+    report_id: uuid.UUID,
+    user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
+):
+    report = await store.get_report(str(report_id), user["id"])
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found or expired.")
+    return report
+
+
+@router.delete("/reports/{report_id}")
+async def delete_owned_report(
+    report_id: uuid.UUID,
+    user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
+):
+    deleted = await store.delete_report(str(report_id), user["id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Report not found or already deleted.")
+    return {"deleted": True}

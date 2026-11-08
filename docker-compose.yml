@@ -1,4 +1,19 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-reposeer}
+      POSTGRES_USER: ${POSTGRES_USER:-reposeer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-reposeer-local-dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-reposeer} -d ${POSTGRES_DB:-reposeer}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -9,12 +24,16 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-reposeer}:${POSTGRES_PASSWORD:-reposeer-local-dev}@postgres:5432/${POSTGRES_DB:-reposeer}}
+      REPOSEER_RATE_LIMIT_HMAC_KEY: ${REPOSEER_RATE_LIMIT_HMAC_KEY:-}
       REPOSEER_CORS_ORIGINS: ${REPOSEER_CORS_ORIGINS:-http://localhost:3001}
-      REPOSEER_MAX_ARCHIVE_SIZE_MB: ${REPOSEER_MAX_ARCHIVE_SIZE_MB:-50}
-      REPOSEER_MAX_EXTRACTED_SIZE_MB: ${REPOSEER_MAX_EXTRACTED_SIZE_MB:-250}
-      REPOSEER_MAX_ARCHIVE_FILES: ${REPOSEER_MAX_ARCHIVE_FILES:-10000}
-      REPOSEER_JOB_TTL_SECONDS: ${REPOSEER_JOB_TTL_SECONDS:-3600}
-      REPOSEER_MAX_JOBS: ${REPOSEER_MAX_JOBS:-100}
+      REPOSEER_MAX_ARCHIVE_SIZE_MB: ${REPOSEER_MAX_ARCHIVE_SIZE_MB:-25}
+      REPOSEER_MAX_EXTRACTED_SIZE_MB: ${REPOSEER_MAX_EXTRACTED_SIZE_MB:-100}
+      REPOSEER_MAX_ARCHIVE_FILES: ${REPOSEER_MAX_ARCHIVE_FILES:-2000}
+      REPOSEER_REPORT_RETENTION_DAYS: ${REPOSEER_REPORT_RETENTION_DAYS:-7}
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 30s
@@ -29,7 +48,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-        NEXT_PUBLIC_MAX_ARCHIVE_SIZE_MB: ${REPOSEER_MAX_ARCHIVE_SIZE_MB:-50}
+        NEXT_PUBLIC_MAX_ARCHIVE_SIZE_MB: ${REPOSEER_MAX_ARCHIVE_SIZE_MB:-25}
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
     ports:
@@ -44,3 +63,6 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
+
+volumes:
+  postgres_data:

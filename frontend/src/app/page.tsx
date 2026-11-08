@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
+import PublicFooter from "@/components/PublicFooter";
 
 export default function LandingPage() {
   return (
@@ -169,10 +170,7 @@ export default function LandingPage() {
         </div>
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-emerald-950/40 py-8 text-center text-xs text-slate-600">
-        Reposeer Architecture Intelligence Studio
-      </footer>
+      <PublicFooter />
     </div>
   );
 }

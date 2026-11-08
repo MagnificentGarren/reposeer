@@ -10,7 +10,7 @@ from app.services.auth import get_current_user
 
 
 @pytest.fixture(autouse=True)
-def authenticated_test_user():
+def authenticated_test_user(fake_database_store):
     app.dependency_overrides[get_current_user] = lambda: {"id": "test-user"}
     yield
     app.dependency_overrides.pop(get_current_user, None)
