@@ -39,10 +39,47 @@ async def run_analysis_task(job_id: str, repo_url: str, store: DatabaseStore):
     ingestion = IngestionService()
     temp_dir = None
     try:
-        await store.update_job(
+        job_active = await store.update_job(
             job_id, status="processing", progress=20, message="Cloning GitHub repository..."
         )
-        temp_dir = await asyncio.to_thread(ingestion.clone_github_repo, repo_url)
+        if not job_active:
+            return
+
+        loop = asyncio.get_running_loop()
+        clone_progress = 20
+        job_recovered = False
+
+        def update_clone_progress(current: float, maximum: float, message: str) -> None:
+            nonlocal clone_progress, job_recovered
+            if maximum > 0:
+                clone_progress = max(clone_progress, 20 + min(14, int(14 * current / maximum)))
+            else:
+                clone_progress = min(34, clone_progress + 1)
+            progress_message = "Cloning GitHub repository..."
+            if message:
+                progress_message = f"Cloning GitHub repository: {message.strip()}"
+            future = asyncio.run_coroutine_threadsafe(
+                store.update_job(
+                    job_id,
+                    status="processing",
+                    progress=clone_progress,
+                    message=progress_message[:500],
+                ),
+                loop,
+            )
+            if not future.result():
+                job_recovered = True
+
+        temp_dir = await asyncio.to_thread(
+            ingestion.clone_github_repo, repo_url, update_clone_progress
+        )
+        if job_recovered:
+            return
+        job_active = await store.update_job(
+            job_id, status="processing", progress=35, message="Repository cloned. Preparing analysis..."
+        )
+        if not job_active:
+            return
         report = await _run_analysis_on_directory(job_id, temp_dir, store)
         ingestion.cleanup_temp_dir(temp_dir)
         temp_dir = None
@@ -60,9 +97,11 @@ async def run_analysis_task(job_id: str, repo_url: str, store: DatabaseStore):
 async def run_zip_analysis_task(job_id: str, extracted_dir: str, store: DatabaseStore):
     ingestion = IngestionService()
     try:
-        await store.update_job(
+        job_active = await store.update_job(
             job_id, status="processing", progress=20, message="Parsing uploaded archive..."
         )
+        if not job_active:
+            return
         report = await _run_analysis_on_directory(job_id, extracted_dir, store)
         ingestion.cleanup_temp_dir(extracted_dir)
         extracted_dir = None
@@ -80,11 +119,52 @@ async def run_zip_analysis_task(job_id: str, extracted_dir: str, store: Database
 async def _run_analysis_on_directory(job_id: str, source_dir: str, store: DatabaseStore):
     ingestion = IngestionService()
 
-    await store.update_job(
-        job_id, status="processing", progress=50, message="Parsing AST & building dependency graph..."
+    job_active = await store.update_job(
+        job_id, status="processing", progress=40, message="Scanning repository for Python files..."
     )
-    report = await asyncio.to_thread(_analyse_directory, ingestion, source_dir)
-    return report
+    if not job_active:
+        return None
+    python_files = await asyncio.to_thread(ingestion.collect_python_files, source_dir)
+    if not python_files:
+        return None
+
+    parser = PythonASTParser()
+    ast_data = []
+    total_files = len(python_files)
+    for index, file in enumerate(python_files, start=1):
+        ast_data.append(
+            await asyncio.to_thread(
+                parser.parse_code, file["relative_path"], file["code"]
+            )
+        )
+        progress = 40 + int(45 * index / total_files)
+        job_active = await store.update_job(
+            job_id,
+            status="processing",
+            progress=progress,
+            message=f"Parsing Python files ({index}/{total_files})...",
+        )
+        if not job_active:
+            return None
+
+    job_active = await store.update_job(
+        job_id, status="processing", progress=90, message="Building dependency graph..."
+    )
+    if not job_active:
+        return None
+    graph_metrics = await asyncio.to_thread(DependencyGraphMapper().build_graph, ast_data)
+    return {
+        "files_analyzed": len(python_files),
+        "ast_summary": ast_data,
+        "repository_files": [
+            {
+                "relative_path": file["relative_path"],
+                "code": file["code"][:12000],
+            }
+            for file in python_files[:40]
+        ],
+        "dependency_graph": graph_metrics,
+    }
 
 
 async def _save_analysis_result(job_id: str, report: dict | None, store: DatabaseStore) -> None:
@@ -103,34 +183,6 @@ async def _save_analysis_result(job_id: str, report: dict | None, store: Databas
         message="Analysis Complete!",
         result=report,
     )
-
-
-def _analyse_directory(ingestion: IngestionService, source_dir: str) -> dict | None:
-    python_files = ingestion.collect_python_files(source_dir)
-    if not python_files:
-        return None
-
-    parser = PythonASTParser()
-    ast_data = [
-        parser.parse_code(f["relative_path"], f["code"])
-        for f in python_files
-    ]
-
-    mapper = DependencyGraphMapper()
-    graph_metrics = mapper.build_graph(ast_data)
-
-    return {
-        "files_analyzed": len(python_files),
-        "ast_summary": ast_data,
-        "repository_files": [
-            {
-                "relative_path": file["relative_path"],
-                "code": file["code"][:12000],
-            }
-            for file in python_files[:40]
-        ],
-        "dependency_graph": graph_metrics,
-    }
 
 
 @router.post("/github")
@@ -203,8 +255,35 @@ async def inspect_uploaded_repository(
                 user["id"], hash_client_ip(request.client.host if request.client else None)
             )
             temp_dir = tempfile.mkdtemp(prefix="reposeer_upload_")
+            loop = asyncio.get_running_loop()
+            last_extract_percent = -1
+            extraction_job_active = True
+
+            def update_extraction_progress(current: int, total: int) -> None:
+                nonlocal last_extract_percent, extraction_job_active
+                percent = int(100 * current / max(total, 1))
+                if percent == last_extract_percent:
+                    return
+                last_extract_percent = percent
+                future = asyncio.run_coroutine_threadsafe(
+                    store.update_job(
+                        job_id,
+                        status="processing",
+                        progress=5 + int(10 * percent / 100),
+                        message=f"Extracting uploaded archive ({percent}%)...",
+                    ),
+                    loop,
+                )
+                if not future.result():
+                    extraction_job_active = False
+
             try:
-                await asyncio.to_thread(IngestionService.extract_zip_safely, archive, temp_dir)
+                await asyncio.to_thread(
+                    IngestionService.extract_zip_safely,
+                    archive,
+                    temp_dir,
+                    update_extraction_progress,
+                )
             except (ValueError, zipfile.BadZipFile) as exc:
                 IngestionService.cleanup_temp_dir(temp_dir)
                 await store.update_job(
@@ -227,6 +306,18 @@ async def inspect_uploaded_repository(
                     status_code=500,
                     detail="The uploaded archive could not be extracted.",
                 ) from exc
+            if not extraction_job_active:
+                IngestionService.cleanup_temp_dir(temp_dir)
+                return {"job_id": job_id, "status": "failed"}
+            job_active = await store.update_job(
+                job_id,
+                status="processing",
+                progress=20,
+                message="Archive extracted. Starting analysis...",
+            )
+            if not job_active:
+                IngestionService.cleanup_temp_dir(temp_dir)
+                return {"job_id": job_id, "status": "failed"}
     except zipfile.BadZipFile as exc:
         raise HTTPException(status_code=400, detail=f"Invalid ZIP archive: {str(exc)}") from exc
 
@@ -254,12 +345,61 @@ async def stream_inspection_progress(
 
             yield f"data: {json.dumps(job)}\n\n"
 
-            if job.get("status") in ("completed", "failed"):
+            if job.get("status") in ("completed", "failed") or job.get("is_stale"):
                 break
 
             await asyncio.sleep(0.5)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/jobs/active")
+async def get_active_analysis_job(
+    user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
+):
+    return {"job": await store.get_active_job(user["id"])}
+
+
+@router.get("/jobs/{job_id}")
+async def get_analysis_job(
+    job_id: uuid.UUID,
+    user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
+):
+    job = await store.get_job(str(job_id), user["id"])
+    if not job:
+        raise HTTPException(status_code=404, detail="Analysis job not found.")
+    return job
+
+
+@router.post("/jobs/{job_id}/recover")
+async def recover_analysis_job(
+    job_id: uuid.UUID,
+    user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
+):
+    recovered = await store.recover_stale_job(str(job_id), user["id"])
+    if recovered is None:
+        raise HTTPException(status_code=404, detail="Analysis job not found.")
+    if recovered == "not_active":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "job_not_active",
+                "message": "This analysis is no longer active and cannot be recovered.",
+            },
+        )
+    if not recovered:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "recovery_not_safe",
+                "message": "This analysis has reported progress recently and cannot be recovered yet.",
+            },
+        )
+    job = await store.get_job(str(job_id), user["id"])
+    return {"job": job, "recovered": True}
 
 
 @router.get("/reports")

@@ -22,6 +22,7 @@ IP_ANALYSES_PER_MONTH = 100
 IP_AI_ACTIONS_PER_DAY = 30
 IP_AI_ACTIONS_PER_MONTH = 300
 REPORT_RETENTION_DAYS = 7
+ANALYSIS_STALE_SECONDS = 300
 
 
 def _positive_int_from_env(name: str, default: int) -> int:
@@ -36,6 +37,9 @@ def _positive_int_from_env(name: str, default: int) -> int:
 
 
 REPORT_RETENTION_DAYS = _positive_int_from_env("REPOSEER_REPORT_RETENTION_DAYS", REPORT_RETENTION_DAYS)
+ANALYSIS_STALE_SECONDS = _positive_int_from_env(
+    "REPOSEER_ANALYSIS_STALE_SECONDS", ANALYSIS_STALE_SECONDS
+)
 logger = logging.getLogger(__name__)
 
 
@@ -125,6 +129,16 @@ def _quota_error(name: str, limit: int, window: str) -> HTTPException:
     )
 
 
+def _active_analysis_error() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "active_analysis",
+            "message": "You already have an active analysis. Resume it or recover it if it is stale.",
+        },
+    )
+
+
 class DatabaseStore:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
@@ -142,16 +156,25 @@ class DatabaseStore:
                         lock_key,
                     )
 
-                await connection.execute(
+                stale_jobs = await connection.fetch(
                     """
                     UPDATE analysis_jobs
                     SET status = 'failed', progress = 0,
-                        message = 'Analysis stopped before it could finish.',
+                        message = 'Analysis was recovered after no progress was reported.',
                         updated_at = now()
-                    WHERE status IN ('queued', 'processing')
-                      AND updated_at < now() - interval '1 hour'
-                    """
+                    WHERE owner_id = $1
+                      AND status IN ('queued', 'processing')
+                      AND updated_at < now() - ($2 * interval '1 second')
+                    RETURNING id
+                    """,
+                    owner_uuid,
+                    ANALYSIS_STALE_SECONDS,
                 )
+                if stale_jobs:
+                    await connection.execute(
+                        "DELETE FROM usage_records WHERE analysis_job_id = ANY($1::uuid[])",
+                        [row["id"] for row in stale_jobs],
+                    )
                 active_analyses = await connection.fetchval(
                     """
                     SELECT count(*) FROM analysis_jobs
@@ -160,7 +183,7 @@ class DatabaseStore:
                     owner_uuid,
                 )
                 if active_analyses >= CONCURRENT_ANALYSES_PER_ACCOUNT:
-                    raise _quota_error("concurrent_analyses", CONCURRENT_ANALYSES_PER_ACCOUNT, "at a time")
+                    raise _active_analysis_error()
 
                 account_daily, account_monthly = await self._usage_counts(
                     connection, owner_uuid, None, "analysis"
@@ -272,45 +295,56 @@ class DatabaseStore:
         progress: int,
         message: str,
         result: dict | None = None,
-    ) -> None:
+    ) -> bool:
         job_uuid = UUID(job_id)
         async with self.pool.acquire() as connection:
             async with connection.transaction():
-                await connection.execute(
+                updated_id = await connection.fetchval(
                     """
                     UPDATE analysis_jobs
                     SET status = $2, progress = $3, message = $4, updated_at = now()
-                    WHERE id = $1
+                    WHERE id = $1 AND status IN ('queued', 'processing')
+                    RETURNING id
                     """,
                     job_uuid,
                     status,
                     progress,
                     message,
                 )
+                if updated_id is None:
+                    return False
+
                 if status == "completed" and result is not None:
                     await connection.execute(
                         """
                         INSERT INTO reports (analysis_job_id, owner_id, result, expires_at)
                         SELECT id, owner_id, $2, now() + ($3 * interval '1 day')
-                        FROM analysis_jobs WHERE id = $1
-                        ON CONFLICT (analysis_job_id) DO UPDATE
-                        SET result = EXCLUDED.result, expires_at = EXCLUDED.expires_at
+                        FROM analysis_jobs WHERE id = $1 AND status = 'completed'
+                        ON CONFLICT (analysis_job_id) DO NOTHING
                         """,
                         job_uuid,
                         result,
                         REPORT_RETENTION_DAYS,
                     )
+                elif status == "failed":
+                    await connection.execute(
+                        "DELETE FROM usage_records WHERE analysis_job_id = $1",
+                        job_uuid,
+                    )
+        return True
 
-    async def get_job(self, job_id: str, owner_id: str) -> dict | None:
+    async def get_active_job(self, owner_id: str) -> dict | None:
         row = await self.pool.fetchrow(
             """
-            SELECT j.id, j.status, j.progress, j.message, j.updated_at, r.result
-            FROM analysis_jobs j
-            LEFT JOIN reports r ON r.analysis_job_id = j.id
-            WHERE j.id = $1 AND j.owner_id = $2
+            SELECT id, status, progress, message, updated_at,
+                   updated_at < now() - ($2 * interval '1 second') AS is_stale
+            FROM analysis_jobs
+            WHERE owner_id = $1 AND status IN ('queued', 'processing')
+            ORDER BY updated_at DESC
+            LIMIT 1
             """,
-            UUID(job_id),
             UUID(owner_id),
+            ANALYSIS_STALE_SECONDS,
         )
         if not row:
             return None
@@ -320,6 +354,73 @@ class DatabaseStore:
             "progress": row["progress"],
             "message": row["message"],
             "updated_at": row["updated_at"].isoformat(),
+            "is_stale": row["is_stale"],
+        }
+
+    async def recover_stale_job(self, job_id: str, owner_id: str) -> bool | str | None:
+        owner_uuid = UUID(owner_id)
+        async with self.pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"account:{owner_id}",
+                )
+                recovered_id = await connection.fetchval(
+                    """
+                    UPDATE analysis_jobs
+                    SET status = 'failed', progress = 0,
+                        message = 'Analysis was recovered after no progress was reported.',
+                        updated_at = now()
+                    WHERE id = $1 AND owner_id = $2
+                      AND status IN ('queued', 'processing')
+                      AND updated_at < now() - ($3 * interval '1 second')
+                    RETURNING id
+                    """,
+                    UUID(job_id),
+                    owner_uuid,
+                    ANALYSIS_STALE_SECONDS,
+                )
+                if recovered_id is None:
+                    state = await connection.fetchrow(
+                        "SELECT status FROM analysis_jobs WHERE id = $1 AND owner_id = $2",
+                        UUID(job_id),
+                        owner_uuid,
+                    )
+                    if not state:
+                        return None
+                    if state["status"] not in ("queued", "processing"):
+                        return "not_active"
+                    return False
+
+                await connection.execute(
+                    "DELETE FROM usage_records WHERE analysis_job_id = $1",
+                    recovered_id,
+                )
+        return True
+
+    async def get_job(self, job_id: str, owner_id: str) -> dict | None:
+        row = await self.pool.fetchrow(
+            """
+            SELECT j.id, j.status, j.progress, j.message, j.updated_at, r.result,
+                   j.status IN ('queued', 'processing')
+                       AND j.updated_at < now() - ($3 * interval '1 second') AS is_stale
+            FROM analysis_jobs j
+            LEFT JOIN reports r  ON r.analysis_job_id = j.id
+            WHERE j.id = $1 AND j.owner_id = $2
+            """,
+            UUID(job_id),
+            UUID(owner_id),
+            ANALYSIS_STALE_SECONDS,
+        )
+        if not row:
+            return None
+        return {
+            "job_id": str(row["id"]),
+            "status": row["status"],
+            "progress": row["progress"],
+            "message": row["message"],
+            "updated_at": row["updated_at"].isoformat(),
+            "is_stale": row["is_stale"],
             **({"result": row["result"]} if row["result"] is not None else {}),
         }
 

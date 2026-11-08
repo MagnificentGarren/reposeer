@@ -1,10 +1,19 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { submitAnalysis } from "@/lib/api";
+import {
+  ActiveAnalysisJob,
+  clearRememberedAnalysisJob,
+  getActiveAnalysisJob,
+  getAnalysisJob,
+  getRememberedAnalysisJobId,
+  recoverAnalysisJob,
+  resumeAnalysis,
+  submitAnalysis,
+} from "@/lib/api";
 import OrbLoader from "@/components/OrbLoader";
 import { startNewRepositorySession } from "@/lib/session";
 import { MAX_ARCHIVE_SIZE_BYTES } from "@/lib/config";
@@ -22,6 +31,49 @@ export default function SeerHubPage() {
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState("Initializing AST Engine...");
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [activeJob, setActiveJob] = useState<ActiveAnalysisJob | null>(null);
+  const [isCheckingJob, setIsCheckingJob] = useState(true);
+  const [isRecovering, setIsRecovering] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const reconnectToJob = async () => {
+      try {
+        const active = await getActiveAnalysisJob();
+        if (cancelled) return;
+        if (active) {
+          setActiveJob(active);
+          return;
+        }
+
+        const rememberedJobId = getRememberedAnalysisJobId();
+        if (!rememberedJobId) return;
+        const rememberedJob = await getAnalysisJob(rememberedJobId);
+        if (cancelled) return;
+        if (rememberedJob.status === "completed" && rememberedJob.result) {
+          startNewRepositorySession({ ...rememberedJob.result, id: rememberedJob.job_id });
+          clearRememberedAnalysisJob();
+          router.push("/seer/results");
+        } else {
+          clearRememberedAnalysisJob();
+          setValidationError(rememberedJob.message || "The previous analysis did not complete.");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          if (getRememberedAnalysisJobId()) clearRememberedAnalysisJob();
+          setValidationError(error instanceof Error ? error.message : "Unable to reconnect to the previous analysis.");
+        }
+      } finally {
+        if (!cancelled) setIsCheckingJob(false);
+      }
+    };
+
+    void reconnectToJob();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const clearSelectedFile = () => {
     setFile(null);
@@ -91,6 +143,16 @@ export default function SeerHubPage() {
       const res = await submitAnalysis({
         repoUrl: activeTab === "github" ? repoUrl : undefined,
         file: activeTab === "upload" && file ? file : undefined,
+        onJobId: (jobId) => {
+          setActiveJob({
+            job_id: jobId,
+            status: "queued",
+            progress: 5,
+            message: "Initializing analysis pipeline...",
+            updated_at: new Date().toISOString(),
+            is_stale: false,
+          });
+        },
         onProgress: (p, msg) => {
           setProgress(p);
           setStatusText(msg);
@@ -108,12 +170,59 @@ export default function SeerHubPage() {
       console.error("Analysis pipeline error:", err);
       const message = err instanceof Error ? err.message : "Failed to complete analysis pipeline.";
       setValidationError(message);
-      if (activeTab === "github") {
-        setRepoUrl("");
-      } else {
-        clearSelectedFile();
+      try {
+        const active = await getActiveAnalysisJob();
+        setActiveJob(active);
+        if (!active && getRememberedAnalysisJobId()) clearRememberedAnalysisJob();
+      } catch {
+        // Keep the remembered job available for a manual reconnect if status lookup fails.
       }
       setIsAnalyzing(false);
+    }
+  };
+
+  const handleResume = async () => {
+    if (!activeJob) return;
+    setIsAnalyzing(true);
+    setProgress(activeJob.progress);
+    setStatusText(activeJob.message);
+    setValidationError(null);
+    try {
+      const report = await resumeAnalysis(activeJob.job_id, (nextProgress, message) => {
+        setProgress(nextProgress);
+        setStatusText(message);
+      });
+      startNewRepositorySession(report);
+      router.push("/seer/results");
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : "Unable to resume this analysis.");
+      try {
+        setActiveJob(await getActiveAnalysisJob());
+      } catch {
+        // Preserve the job ID and allow another reconnect attempt.
+      }
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleRecover = async () => {
+    if (!activeJob) return;
+    setIsRecovering(true);
+    setValidationError(null);
+    try {
+      await recoverAnalysisJob(activeJob.job_id);
+      clearRememberedAnalysisJob();
+      setActiveJob(null);
+      setValidationError("The stale analysis was safely recovered. Its late worker cannot save or replace a report; you can start a new analysis.");
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : "Unable to recover this analysis.");
+      try {
+        setActiveJob(await getActiveAnalysisJob());
+      } catch {
+        // Keep the current job details visible when status lookup is temporarily unavailable.
+      }
+    } finally {
+      setIsRecovering(false);
     }
   };
 
@@ -184,6 +293,43 @@ export default function SeerHubPage() {
       <main className="relative z-10 flex-1 max-w-3xl w-full mx-auto px-6 py-12 flex flex-col items-center justify-center">
         {isAnalyzing ? (
           <OrbLoader progress={progress} statusText={statusText} />
+        ) : isCheckingJob ? (
+          <div className="text-sm text-slate-400">Checking for an active analysis...</div>
+        ) : activeJob ? (
+          <div className="w-full rounded-3xl border border-emerald-500/30 bg-emerald-950/30 p-8 shadow-[0_0_60px_rgba(16,185,129,0.12)] backdrop-blur-xl">
+            <p className="text-xs font-mono uppercase tracking-wider text-emerald-300">
+              {activeJob.is_stale ? "Analysis has stopped reporting progress" : "Analysis in progress"}
+            </p>
+            <h2 className="mt-3 text-2xl font-bold text-slate-100">
+              {activeJob.is_stale ? "This analysis may be stalled" : "Resume your analysis"}
+            </h2>
+            <p className="mt-3 text-sm text-slate-300">{activeJob.message}</p>
+            <p className="mt-2 text-xs text-slate-500">Progress: {activeJob.progress}%</p>
+            {validationError && (
+              <div className="mt-5 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                {validationError}
+              </div>
+            )}
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={handleResume}
+                className="rounded-xl bg-emerald-500 px-5 py-3 font-bold text-slate-950 hover:bg-emerald-400"
+              >
+                Resume analysis
+              </button>
+              {activeJob.is_stale && (
+                <button
+                  type="button"
+                  onClick={handleRecover}
+                  disabled={isRecovering}
+                  className="rounded-xl border border-amber-400/50 px-5 py-3 font-semibold text-amber-200 disabled:opacity-50"
+                >
+                  {isRecovering ? "Checking recovery..." : "Recover stalled analysis"}
+                </button>
+              )}
+            </div>
+          </div>
         ) : (
           <div className="w-full bg-emerald-950/30 border border-emerald-500/30 rounded-3xl p-8 sm:p-10 shadow-[0_0_60px_rgba(16,185,129,0.12)] backdrop-blur-xl relative">
             <div className="text-center mb-8">

@@ -1,7 +1,12 @@
 import pytest
 from fastapi import HTTPException
 
-from app.services.database import _database_connection_options, _quota_error, hash_client_ip
+from app.services.database import (
+    _active_analysis_error,
+    _database_connection_options,
+    _quota_error,
+    hash_client_ip,
+)
 
 
 def test_quota_error_has_actionable_http_response():
@@ -10,6 +15,13 @@ def test_quota_error_has_actionable_http_response():
     assert error.status_code == 429
     assert error.detail["code"] == "quota_exceeded"
     assert error.detail["message"] == "Ai actions limit reached (10 per day). Please try again later."
+
+
+def test_active_analysis_conflict_is_distinct_from_quota_exhaustion():
+    error = _active_analysis_error()
+
+    assert error.status_code == 409
+    assert error.detail["code"] == "active_analysis"
 
 
 def test_client_ip_hash_is_stable_and_keyed(monkeypatch):

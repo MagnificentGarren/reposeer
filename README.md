@@ -409,10 +409,11 @@ Set the Supabase project URL and public anon key in both the server-only and `NE
 | `REPOSEER_MAX_EXTRACTED_SIZE_MB` | Maximum expanded ZIP size | `100` |
 | `REPOSEER_MAX_ARCHIVE_FILES` | Maximum number of files in an uploaded ZIP | `2000` |
 | `REPOSEER_REPORT_RETENTION_DAYS` | Report retention period; expired reports are deleted automatically | `7` |
+| `REPOSEER_ANALYSIS_STALE_SECONDS` | Time without reported job progress before recovery is allowed | `300` |
 
-The initial invited-beta quotas are **3 analyses per day and 20 per month per account**, **1 concurrent analysis**, and **10 AI actions per day and 100 per month per account**. Shared IP limits are **10 analyses per day and 100 per month**, plus **30 AI actions per day and 300 per month**. A ZIP is limited to 25 MB compressed, 100 MB extracted, and 2,000 files. Limits are enforced by the API and rejected requests return HTTP 429 with a quota-specific message. Quota usage is written transactionally before work starts; unsuccessful provider or analysis attempts still count.
+The initial invited-beta quotas are **3 successful analyses per day and 20 per month per account**, **1 concurrent analysis**, and **10 AI actions per day and 100 per month per account**. Shared IP limits are **10 successful analyses per day and 100 per month**, plus **30 AI actions per day and 300 per month**. A ZIP is limited to 25 MB compressed, 100 MB extracted, and 2,000 files. Daily and monthly quota exhaustion returns HTTP 429; an existing active analysis returns HTTP 409 instead. Analysis usage is reserved at start and removed when the attempt fails or is safely recovered, so unsuccessful analyses do not consume quota.
 
-Analysis archives and Git checkouts are temporary and removed after analysis. Reports, including repository excerpts used for the AI context, are private to the verified account and retained for 7 days by default. Users can review and delete their saved reports from **Seer Hub → View saved reports**. Usage records keep account IDs and keyed IP hashes for up to 13 months for quota enforcement and operational monitoring.
+Analysis archives and Git checkouts are temporary and removed after analysis. Progress is recorded at clone and file-parsing milestones; the stale threshold is configurable with `REPOSEER_ANALYSIS_STALE_SECONDS`. Signed-in users can reconnect to their active analysis from Seer Hub after a refresh or dropped connection. Recovery is available only after the job has reported no progress for the configured interval; the backend fences off late updates and report writes from recovered workers. Reports, including repository excerpts used for the AI context, are private to the verified account and retained for 7 days by default. Users can review and delete their saved reports from **Seer Hub → View saved reports**. Usage records keep account IDs and keyed IP hashes for up to 13 months for quota enforcement and operational monitoring.
 
 ⚠️ **Never commit API keys, credentials, or other secrets to GitHub.**
 
@@ -484,7 +485,7 @@ http://localhost:8000/docs
 
 The backend responds at `http://localhost:8000/health`. Compose waits for the backend health check before starting the frontend and reports health for both services.
 
-The backend keeps inspection jobs in process memory, so the production server runs one worker and should run as a single backend replica. Use a persistent job queue/store before scaling it horizontally. For deployment behind a reverse proxy, allow request bodies up to the configured ZIP limit plus multipart overhead, and preserve long-lived responses from `/api/inspect/stream/` and `/api/seer/chat`.
+The backend persists inspection job metadata in PostgreSQL, but analysis workers are scheduled in process memory. Run one backend worker and a single backend replica; use a persistent job queue before scaling horizontally. For deployment behind a reverse proxy, allow request bodies up to the configured ZIP limit plus multipart overhead, and preserve long-lived responses from `/api/inspect/stream/` and `/api/seer/chat`.
 
 ### Stop the application
 

@@ -5,6 +5,17 @@ interface AnalysisInput {
   repoUrl?: string;
   file?: File;
   onProgress?: (progress: number, message: string) => void;
+  onJobId?: (jobId: string) => void;
+}
+
+export interface ActiveAnalysisJob {
+  job_id: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  progress: number;
+  message: string;
+  updated_at: string;
+  is_stale?: boolean;
+  result?: unknown;
 }
 
 export interface SavedReport {
@@ -12,6 +23,24 @@ export interface SavedReport {
   created_at: string;
   expires_at: string;
   files_analyzed: number;
+}
+
+const ACTIVE_JOB_STORAGE_KEY = "reposeer_active_analysis_job";
+
+export function rememberActiveAnalysisJob(jobId: string): void {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, jobId);
+  }
+}
+
+export function getRememberedAnalysisJobId(): string | null {
+  return typeof window === "undefined" ? null : localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
+}
+
+export function clearRememberedAnalysisJob(): void {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+  }
 }
 
 export function apiErrorMessage(errorData: unknown, fallback: string): string {
@@ -29,6 +58,34 @@ async function reportRequest(path: string, method = "GET"): Promise<Response> {
     method,
     headers: await getAuthorizationHeaders(),
   });
+}
+
+async function analysisJobRequest(path: string, method = "GET"): Promise<Response> {
+  return fetch(`${API_BASE_URL}/api/inspect/jobs${path}`, {
+    method,
+    headers: await getAuthorizationHeaders(),
+  });
+}
+
+export async function getActiveAnalysisJob(): Promise<ActiveAnalysisJob | null> {
+  const response = await analysisJobRequest("/active");
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(apiErrorMessage(payload, "Unable to check for an active analysis."));
+  return payload.job || null;
+}
+
+export async function getAnalysisJob(jobId: string): Promise<ActiveAnalysisJob> {
+  const response = await analysisJobRequest(`/${encodeURIComponent(jobId)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(apiErrorMessage(payload, "Unable to reconnect to this analysis."));
+  return payload;
+}
+
+export async function recoverAnalysisJob(jobId: string): Promise<ActiveAnalysisJob> {
+  const response = await analysisJobRequest(`/${encodeURIComponent(jobId)}/recover`, "POST");
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(apiErrorMessage(payload, "Unable to recover this analysis."));
+  return payload.job;
 }
 
 export async function listSavedReports(): Promise<SavedReport[]> {
@@ -96,6 +153,91 @@ function buildPythonRequiredMessage(source: "GitHub" | "ZIP") {
   return "Analysis requires at least one Python file in the uploaded archive. Please upload a ZIP that contains Python source files, not just documentation or non-Python assets.";
 }
 
+async function watchAnalysisJob(
+  jobId: string,
+  onProgress?: (progress: number, message: string) => void,
+  source?: "GitHub" | "ZIP",
+): Promise<unknown> {
+  const streamResponse = await fetch(`${API_BASE_URL}/api/inspect/stream/${encodeURIComponent(jobId)}`, {
+    headers: await getAuthorizationHeaders(),
+  });
+  if (!streamResponse.ok) {
+    const errorData = await streamResponse.json().catch(() => ({}));
+    throw new Error(typeof errorData.detail === "string" ? errorData.detail : "Unable to read inspection progress.");
+  }
+  if (!streamResponse.body) {
+    throw new Error("The inspection progress stream was unavailable.");
+  }
+
+  const reader = streamResponse.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    pending += decoder.decode(value, { stream: !done });
+    const frames = pending.split(/\r?\n\r?\n/);
+    pending = frames.pop() || "";
+
+    for (const frame of frames) {
+      const eventData = frame
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trim())
+        .join("\n");
+      if (!eventData) continue;
+
+      let payload: {
+        progress?: number;
+        message?: string;
+        status?: string;
+        is_stale?: boolean;
+        result?: unknown;
+      };
+      try {
+        payload = JSON.parse(eventData);
+      } catch {
+        throw new Error("Failed to parse event stream payload.");
+      }
+
+      if (onProgress && typeof payload.progress === "number") {
+        onProgress?.(payload.progress, payload.message || "Analyzing repository...");
+      }
+      if (payload.is_stale) {
+        throw new Error("This analysis has stopped reporting progress. Return to Seer Hub to resume or recover it.");
+      }
+      if (payload.status === "completed") {
+        clearRememberedAnalysisJob();
+        const result = payload.result;
+        return result && typeof result === "object"
+          ? { ...result, id: jobId }
+          : { id: jobId, result };
+      }
+      if (payload.status === "failed") {
+        clearRememberedAnalysisJob();
+        const message = payload.message || "Inspection job encountered an error on the server.";
+        throw new Error(
+          message.toLowerCase().includes("requires at least one python file")
+            ? buildPythonRequiredMessage(source || "ZIP")
+            : message,
+        );
+      }
+    }
+
+    if (done) break;
+  }
+
+  throw new Error("Connection to the inspection telemetry stream was lost.");
+}
+
+export async function resumeAnalysis(
+  jobId: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<unknown> {
+  rememberActiveAnalysisJob(jobId);
+  return watchAnalysisJob(jobId, onProgress);
+}
+
 export async function submitAnalysis(data: AnalysisInput): Promise<unknown> {
   let response: Response;
   const controller = new AbortController();
@@ -140,70 +282,8 @@ export async function submitAnalysis(data: AnalysisInput): Promise<unknown> {
     throw new Error(detail);
   }
 
-  const { job_id } = await response.json();
-
-  const streamResponse = await fetch(`${API_BASE_URL}/api/inspect/stream/${job_id}`, {
-    headers: await getAuthorizationHeaders(),
-  });
-  if (!streamResponse.ok) {
-    const errorData = await streamResponse.json().catch(() => ({}));
-    throw new Error(typeof errorData.detail === "string" ? errorData.detail : "Unable to read inspection progress.");
-  }
-  if (!streamResponse.body) {
-    throw new Error("The inspection progress stream was unavailable.");
-  }
-
-  const reader = streamResponse.body.getReader();
-  const decoder = new TextDecoder();
-  let pending = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    pending += decoder.decode(value, { stream: !done });
-    const frames = pending.split(/\r?\n\r?\n/);
-    pending = frames.pop() || "";
-
-    for (const frame of frames) {
-      const eventData = frame
-        .split(/\r?\n/)
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim())
-        .join("\n");
-      if (!eventData) continue;
-
-      let payload: {
-        progress?: number;
-        message?: string;
-        status?: string;
-        result?: unknown;
-      };
-      try {
-        payload = JSON.parse(eventData);
-      } catch {
-        throw new Error("Failed to parse event stream payload.");
-      }
-
-      if (data.onProgress && typeof payload.progress === "number") {
-        data.onProgress(payload.progress, payload.message || "Analyzing repository...");
-      }
-      if (payload.status === "completed") {
-        const result = payload.result;
-        return result && typeof result === "object"
-          ? { ...result, id: job_id }
-          : { id: job_id, result };
-      }
-      if (payload.status === "failed") {
-        const message = payload.message || "Inspection job encountered an error on the server.";
-        throw new Error(
-          message.toLowerCase().includes("requires at least one python file")
-            ? buildPythonRequiredMessage(data.repoUrl ? "GitHub" : "ZIP")
-            : message,
-        );
-      }
-    }
-
-    if (done) break;
-  }
-
-  throw new Error("Connection to the inspection telemetry stream was lost.");
+  const { job_id: jobId } = await response.json();
+  rememberActiveAnalysisJob(jobId);
+  data.onJobId?.(jobId);
+  return watchAnalysisJob(jobId, data.onProgress, data.repoUrl ? "GitHub" : "ZIP");
 }

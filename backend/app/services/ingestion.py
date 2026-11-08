@@ -4,7 +4,9 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
-from git import Repo # type: ignore
+from collections.abc import Callable
+
+from git import RemoteProgress, Repo  # type: ignore
 
 
 def _positive_int_from_env(name: str, default: int) -> int:
@@ -27,11 +29,19 @@ class IngestionService:
     """Handles local directory scanning and temporary GitHub cloning."""
 
     @staticmethod
-    def clone_github_repo(repo_url: str) -> str:
+    def clone_github_repo(
+        repo_url: str, progress_callback: Callable[[float, float, str], None] | None = None
+    ) -> str:
         """Clones a public GitHub repo into a temporary system directory."""
         temp_dir = tempfile.mkdtemp(prefix="reposeer_repo_")
         try:
-            Repo.clone_from(repo_url, temp_dir, depth=1)
+            class CloneProgress(RemoteProgress):
+                def update(self, op_code, cur_count, max_count=None, message=""):
+                    super().update(op_code, cur_count, max_count, message)
+                    if progress_callback:
+                        progress_callback(cur_count, max_count or 0, message)
+
+            Repo.clone_from(repo_url, temp_dir, depth=1, progress=CloneProgress())
             return temp_dir
         except Exception as e:
             if os.path.exists(temp_dir):
@@ -69,7 +79,11 @@ class IngestionService:
         return python_files
 
     @staticmethod
-    def extract_zip_safely(archive: zipfile.ZipFile, destination: str) -> None:
+    def extract_zip_safely(
+        archive: zipfile.ZipFile,
+        destination: str,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> None:
         """Validate and extract an uploaded archive within configured limits."""
         destination_path = Path(destination).resolve()
         entries = archive.infolist()
@@ -98,6 +112,7 @@ class IngestionService:
                 raise ValueError("The uploaded ZIP contains an unsupported symbolic link.")
 
         destination_path.mkdir(parents=True, exist_ok=True)
+        bytes_extracted = 0
         for entry in entries:
             target_path = destination_path / Path(entry.filename)
             if entry.is_dir():
@@ -106,7 +121,13 @@ class IngestionService:
 
             target_path.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(entry, "r") as source, target_path.open("wb") as target:
-                shutil.copyfileobj(source, target)
+                while chunk := source.read(1024 * 1024):
+                    target.write(chunk)
+                    bytes_extracted += len(chunk)
+                    if progress_callback:
+                        progress_callback(bytes_extracted, extracted_size)
+        if progress_callback:
+            progress_callback(bytes_extracted, extracted_size)
 
     @staticmethod
     def cleanup_temp_dir(temp_dir: str) -> None:
