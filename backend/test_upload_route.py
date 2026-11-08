@@ -1,10 +1,19 @@
 from io import BytesIO
 import zipfile
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 import app.services.ingestion as ingestion
+from app.services.auth import get_current_user
+
+
+@pytest.fixture(autouse=True)
+def authenticated_test_user():
+    app.dependency_overrides[get_current_user] = lambda: {"id": "test-user"}
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_upload_zip_endpoint_accepts_archive():

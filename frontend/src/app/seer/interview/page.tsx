@@ -21,6 +21,7 @@ import {
   writeReposeerSession,
 } from "@/lib/session";
 import { API_BASE_URL } from "@/lib/config";
+import { getAuthorizationHeaders } from "@/lib/supabase";
 
 type Difficulty = "Easy" | "Medium" | "Hard";
 
@@ -115,7 +116,7 @@ export default function SeerInterviewPage() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/interview/generate-question`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await getAuthorizationHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           difficulty: selectedDiff,
           report_context: currentReport || {},
@@ -198,7 +199,7 @@ export default function SeerInterviewPage() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/interview/evaluate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await getAuthorizationHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           question: questionData.question,
           candidate_answer: candidateAnswer,

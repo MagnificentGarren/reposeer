@@ -10,7 +10,7 @@ import uuid
 import zipfile
 from collections import OrderedDict
 from urllib.parse import urlparse
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -21,6 +21,7 @@ from app.services.ingestion import (
 )
 from app.services.ast_parser import PythonASTParser
 from app.services.graph_mapper import DependencyGraphMapper
+from app.services.auth import get_current_user
 
 router = APIRouter()
 
@@ -141,7 +142,9 @@ def _run_analysis_on_directory(job_id: str, source_dir: str):
 
 @router.post("/github")
 async def inspect_github_repository(
-    payload: GitHubInspectRequest, background_tasks: BackgroundTasks
+    payload: GitHubInspectRequest,
+    background_tasks: BackgroundTasks,
+    user: dict[str, str] = Depends(get_current_user),
 ):
     repo_url = (payload.repo_url or "").strip()
     parsed = urlparse(repo_url)
@@ -158,7 +161,13 @@ async def inspect_github_repository(
         )
 
     job_id = str(uuid.uuid4())
-    _set_job(job_id, status="queued", progress=5, message="Initializing analysis pipeline...")
+    _set_job(
+        job_id,
+        user_id=user["id"],
+        status="queued",
+        progress=5,
+        message="Initializing analysis pipeline...",
+    )
 
     background_tasks.add_task(run_analysis_task, job_id, repo_url)
 
@@ -169,6 +178,7 @@ async def inspect_github_repository(
 async def inspect_uploaded_repository(
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = None,
+    user: dict[str, str] = Depends(get_current_user),
 ):
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(
@@ -177,7 +187,13 @@ async def inspect_uploaded_repository(
         )
 
     job_id = str(uuid.uuid4())
-    _set_job(job_id, status="queued", progress=5, message="Initializing ZIP analysis pipeline...")
+    _set_job(
+        job_id,
+        user_id=user["id"],
+        status="queued",
+        progress=5,
+        message="Initializing ZIP analysis pipeline...",
+    )
 
     temp_dir = tempfile.mkdtemp(prefix="reposeer_upload_")
 
@@ -218,18 +234,27 @@ async def inspect_uploaded_repository(
 
 
 @router.get("/stream/{job_id}")
-async def stream_inspection_progress(job_id: str):
+async def stream_inspection_progress(
+    job_id: str,
+    user: dict[str, str] = Depends(get_current_user),
+):
+    _prune_jobs()
+    initial_job = jobs.get(job_id)
+    if not initial_job or initial_job.get("user_id") != user["id"]:
+        raise HTTPException(status_code=404, detail="Analysis job not found.")
+
     async def event_generator():
         while True:
             _prune_jobs()
             job = jobs.get(job_id)
-            if not job:
+            if not job or job.get("user_id") != user["id"]:
                 yield f"data: {json.dumps({'progress': 0, 'message': 'Job not found'})}\n\n"
                 break
 
-            yield f"data: {json.dumps(job)}\n\n"
+            public_job = {key: value for key, value in job.items() if key != "user_id"}
+            yield f"data: {json.dumps(public_job)}\n\n"
 
-            if job.get("status") in ("completed", "failed"):
+            if public_job.get("status") in ("completed", "failed"):
                 break
 
             await asyncio.sleep(0.5)

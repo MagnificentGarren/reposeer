@@ -12,6 +12,7 @@ import {
 } from "@/lib/session";
 import type { ChatMessage } from "@/lib/session";
 import { API_BASE_URL } from "@/lib/config";
+import { getAuthorizationHeaders } from "@/lib/supabase";
 
 interface RepositoryScores {
   overall?: number;
@@ -176,7 +177,7 @@ export default function SeerCasualPage() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/seer/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await getAuthorizationHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           query: userQuery,
           report_context: report,

@@ -1,9 +1,10 @@
 import os
 import re
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
+from app.services.auth import get_current_user
 
 router = APIRouter()
 
@@ -57,7 +58,10 @@ def clean_generated_question(text: str) -> str:
 
 
 @router.post("/generate-question")
-async def generate_interview_question(payload: QuestionGenerateRequest):
+async def generate_interview_question(
+    payload: QuestionGenerateRequest,
+    user: dict[str, str] = Depends(get_current_user),
+):
     context = payload.report_context or {}
     ast_summary = context.get("ast_summary") or []
     repository_files = context.get("repository_files") or []
@@ -123,7 +127,10 @@ async def generate_interview_question(payload: QuestionGenerateRequest):
 
 
 @router.post("/evaluate")
-async def evaluate_candidate_response(payload: EvaluateResponseRequest):
+async def evaluate_candidate_response(
+    payload: EvaluateResponseRequest,
+    user: dict[str, str] = Depends(get_current_user),
+):
     system_instruction = (
         "You are Reposeer Technical Assessor. Evaluate the candidate's interview response on a technical scale of 0-100.\n"
         "Provide constructive feedback using standard UK English spelling (e.g., analyse, organisation, optimisation).\n"

@@ -1,4 +1,5 @@
 import { API_BASE_URL, MAX_ARCHIVE_SIZE_BYTES, REQUEST_TIMEOUT_MS } from "@/lib/config";
+import { getAuthorizationHeaders } from "@/lib/supabase";
 
 interface AnalysisInput {
   repoUrl?: string;
@@ -61,9 +62,9 @@ export async function submitAnalysis(data: AnalysisInput): Promise<unknown> {
       const repoUrl = validateGithubUrl(data.repoUrl);
       response = await fetch(`${API_BASE_URL}/api/inspect/github`, {
         method: "POST",
-        headers: {
+        headers: await getAuthorizationHeaders({
           "Content-Type": "application/json",
-        },
+        }),
         body: JSON.stringify({ repo_url: repoUrl }),
         signal: controller.signal,
       });
@@ -73,6 +74,7 @@ export async function submitAnalysis(data: AnalysisInput): Promise<unknown> {
       formData.append("file", file);
       response = await fetch(`${API_BASE_URL}/api/inspect/upload`, {
         method: "POST",
+        headers: await getAuthorizationHeaders(),
         body: formData,
         signal: controller.signal,
       });
@@ -96,37 +98,65 @@ export async function submitAnalysis(data: AnalysisInput): Promise<unknown> {
 
   const { job_id } = await response.json();
 
-  // 2. Stream SSE events until completed or failed
-  return new Promise((resolve, reject) => {
-    const eventSource = new EventSource(`${API_BASE_URL}/api/inspect/stream/${job_id}`);
-
-    eventSource.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-
-        // Signal progress updates to the caller UI
-        if (data.onProgress && typeof payload.progress === "number") {
-          data.onProgress(payload.progress, payload.message || "Analyzing repository...");
-        }
-
-        if (payload.status === "completed") {
-          eventSource.close();
-          // Extract nested result object if provided by FastAPI envelope
-          resolve(payload.result || payload);
-        } else if (payload.status === "failed") {
-          eventSource.close();
-          const message = payload.message || "Inspection job encountered an error on the server.";
-          reject(new Error(message.toLowerCase().includes("requires at least one python file") ? buildPythonRequiredMessage(data.repoUrl ? "GitHub" : "ZIP") : message));
-        }
-      } catch {
-        eventSource.close();
-        reject(new Error("Failed to parse event stream payload."));
-      }
-    };
-
-    eventSource.onerror = () => {
-      eventSource.close();
-      reject(new Error("Connection to the inspection telemetry stream was lost."));
-    };
+  const streamResponse = await fetch(`${API_BASE_URL}/api/inspect/stream/${job_id}`, {
+    headers: await getAuthorizationHeaders(),
   });
+  if (!streamResponse.ok) {
+    const errorData = await streamResponse.json().catch(() => ({}));
+    throw new Error(typeof errorData.detail === "string" ? errorData.detail : "Unable to read inspection progress.");
+  }
+  if (!streamResponse.body) {
+    throw new Error("The inspection progress stream was unavailable.");
+  }
+
+  const reader = streamResponse.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    pending += decoder.decode(value, { stream: !done });
+    const frames = pending.split(/\r?\n\r?\n/);
+    pending = frames.pop() || "";
+
+    for (const frame of frames) {
+      const eventData = frame
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trim())
+        .join("\n");
+      if (!eventData) continue;
+
+      let payload: {
+        progress?: number;
+        message?: string;
+        status?: string;
+        result?: unknown;
+      };
+      try {
+        payload = JSON.parse(eventData);
+      } catch {
+        throw new Error("Failed to parse event stream payload.");
+      }
+
+      if (data.onProgress && typeof payload.progress === "number") {
+        data.onProgress(payload.progress, payload.message || "Analyzing repository...");
+      }
+      if (payload.status === "completed") {
+        return payload.result || payload;
+      }
+      if (payload.status === "failed") {
+        const message = payload.message || "Inspection job encountered an error on the server.";
+        throw new Error(
+          message.toLowerCase().includes("requires at least one python file")
+            ? buildPythonRequiredMessage(data.repoUrl ? "GitHub" : "ZIP")
+            : message,
+        );
+      }
+    }
+
+    if (done) break;
+  }
+
+  throw new Error("Connection to the inspection telemetry stream was lost.");
 }

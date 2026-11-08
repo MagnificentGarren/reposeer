@@ -391,11 +391,15 @@ Copy the example configuration to `.env` in the repository root:
 Copy-Item .env.example .env
 ```
 
-Set `GEMINI_API_KEY` in `.env` to enable chat and interview features. The app can start without it, but those AI endpoints will return a clear configuration error. Set `NEXT_PUBLIC_API_URL` to the URL the user's browser can reach; it is embedded in the frontend image at build time. Set `REPOSEER_CORS_ORIGINS` to a comma-separated allowlist of frontend origins.
+Set the Supabase project URL and public anon key in both the server-only and `NEXT_PUBLIC_` settings below. Google sign-in also requires the dashboard configuration described in [Google and Supabase OAuth setup](#-google-and-supabase-oauth-setup). Set `GEMINI_API_KEY` for chat and interview AI. `NEXT_PUBLIC_API_URL` is the URL the user's browser can reach; it is embedded in the frontend image at build time. Set `REPOSEER_CORS_ORIGINS` to a comma-separated allowlist of frontend origins.
 
 | Setting | Purpose | Default |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | Google Gemini key for chat and interview features | unset |
+| `SUPABASE_URL` | Supabase project URL used by the backend to verify access tokens | unset |
+| `SUPABASE_ANON_KEY` | Supabase public anon key sent to the Auth user-verification endpoint | unset |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase URL used by the frontend auth client | unset |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase public anon key used by the frontend auth client; safe to expose | unset |
 | `NEXT_PUBLIC_API_URL` | Browser-visible backend URL; requires rebuilding the frontend image when changed | `http://localhost:8000` |
 | `REPOSEER_CORS_ORIGINS` | Comma-separated exact frontend origins allowed by the backend | local frontend origins |
 | `REPOSEER_MAX_ARCHIVE_SIZE_MB` | Maximum ZIP upload size; shared with the frontend image build | `50` |
@@ -405,6 +409,39 @@ Set `GEMINI_API_KEY` in `.env` to enable chat and interview features. The app ca
 | `REPOSEER_MAX_JOBS` | Maximum retained in-memory jobs | `100` |
 
 ⚠️ **Never commit API keys, credentials, or other secrets to GitHub.**
+
+---
+
+# 🔑 Google and Supabase OAuth Setup
+
+The browser signs in with Google through Supabase Auth. The backend verifies each bearer token with Supabase Auth and uses the returned user ID; browser-supplied user IDs are never trusted. Keep the Supabase **service-role** key out of the frontend and out of these environment variables.
+
+1. **Create or select a Supabase project.** In the Supabase dashboard, open **Project Settings → API** and copy the project URL and the public `anon` key. Do not copy the `service_role` secret.
+2. **Create a Google OAuth client.** In Google Cloud Console, select a project, complete the OAuth consent-screen configuration, and create an OAuth client ID with application type **Web application**.
+3. **Copy Supabase's provider callback URL.** In Supabase, open **Authentication → Sign In / Providers → Google**. Copy the callback URL shown on that page. It has this form, using your project's actual reference:
+
+   ```text
+   https://<project-ref>.supabase.co/auth/v1/callback
+   ```
+
+4. **Register the callback with Google.** Add that exact URL to the Google OAuth client's **Authorised redirect URIs**. Do not use the frontend's `/auth/callback` URL here; Google returns to Supabase first.
+5. **Enable Google in Supabase.** Turn on the Google provider and paste the Google OAuth client ID and client secret into the Supabase provider form. Save the provider settings.
+6. **Allow the frontend return URLs in Supabase.** In **Authentication → URL Configuration**, set the Site URL to the deployed app's canonical origin and add every app callback URL to **Redirect URLs**. Examples:
+
+   ```text
+   http://localhost:3000/auth/callback
+   http://localhost:3001/auth/callback
+   https://staging.example.com/auth/callback
+   https://app.example.com/auth/callback
+   ```
+
+   Replace the staging and production examples with the real origins. Include only environments you control.
+7. **Set local configuration.** In the repository root `.env`, set `SUPABASE_URL` and `SUPABASE_ANON_KEY` for the backend. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_API_URL=http://localhost:8000` for the frontend. Docker Compose passes these frontend settings into the build. When running Next.js directly from `frontend`, also create `frontend/.env.local` with those three `NEXT_PUBLIC_` settings because Next.js loads environment files from the frontend project directory. Allow both development origins in the backend with `REPOSEER_CORS_ORIGINS=http://localhost:3000,http://localhost:3001`.
+8. **Set deployed configuration.** In the backend deployment, set `SUPABASE_URL` and `SUPABASE_ANON_KEY`. In the frontend build environment, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`, plus `NEXT_PUBLIC_API_URL`. Configure `REPOSEER_CORS_ORIGINS` on the backend to include the exact frontend origin (scheme, host, and port; no path or wildcard). Rebuild the frontend after changing `NEXT_PUBLIC_` values.
+9. **Configure Google's consent screen.** Supply the app name, support email, developer contact, and requested scopes (`openid`, `email`, and `profile` are sufficient for this sign-in). Add a homepage, privacy policy, and terms URL if Google requires them for the selected publishing status. While the consent screen is in testing, add each test user's Google account to the test-user list. Move the app to production when ready; Google may require domain verification or OAuth verification depending on the scopes and usage.
+10. **Restart and verify.** Run `docker compose up --build` (or restart the local frontend and backend). Open the site, choose **Sign in with Google**, complete the Google consent flow, and return to the app. Start an analysis and try chat or interview mode. A signed-out request or invalid/expired token should receive HTTP 401; the analysis progress stream is visible only to the account that started it.
+
+The public home, About, and Guide pages remain available without signing in. Reports and chat history are currently kept in the browser's session storage, not synced to an account; temporary server-side analysis jobs are in-memory and scoped to their verified owner.
 
 ---
 
@@ -526,12 +563,14 @@ http://localhost:3000
 | ------ | ---------------------------------- | ----------------------------------- |
 | `GET`  | `/`                                | Backend health response             |
 | `GET`  | `/health`                          | Container health check               |
-| `POST` | `/api/inspect/github`              | Analyse a public GitHub repository  |
-| `POST` | `/api/inspect/upload`              | Analyse an uploaded ZIP archive     |
-| `GET`  | `/api/inspect/stream/{job_id}`     | Stream inspection progress          |
-| `POST` | `/api/seer/chat`                   | AI-assisted repository conversation |
-| `POST` | `/api/interview/generate-question` | Generate an interview scenario      |
-| `POST` | `/api/interview/evaluate`          | Evaluate an interview response      |
+| `POST` | `/api/inspect/github`              | Analyse a public GitHub repository (bearer token required) |
+| `POST` | `/api/inspect/upload`              | Analyse an uploaded ZIP archive (bearer token required) |
+| `GET`  | `/api/inspect/stream/{job_id}`     | Stream progress for the verified job owner |
+| `POST` | `/api/seer/chat`                   | AI-assisted repository conversation (bearer token required) |
+| `POST` | `/api/interview/generate-question` | Generate an interview scenario (bearer token required) |
+| `POST` | `/api/interview/evaluate`          | Evaluate an interview response (bearer token required) |
+
+Protected API calls require `Authorization: Bearer <Supabase access token>`. The backend verifies the token with Supabase Auth and uses the returned user ID.
 
 ### Example
 
@@ -539,6 +578,7 @@ Start a repository inspection:
 
 ```bash
 curl -X POST http://localhost:8000/api/inspect/github \
+  -H "Authorization: Bearer <supabase-access-token>" \
   -H "Content-Type: application/json" \
   -d "{\"repo_url\":\"https://github.com/owner/repository\"}"
 ```
@@ -555,7 +595,8 @@ The API returns a job identifier:
 Use the identifier to stream analysis progress:
 
 ```bash
-curl http://localhost:8000/api/inspect/stream/job-identifier
+curl http://localhost:8000/api/inspect/stream/job-identifier \
+  -H "Authorization: Bearer <supabase-access-token>"
 ```
 
 ---
@@ -621,7 +662,7 @@ Some important considerations when running Reposeer:
 * 🧠 Analysis jobs are currently stored temporarily in memory.
 * 🐙 GitHub ingestion currently supports public repositories.
 * 🌐 Configure `REPOSEER_CORS_ORIGINS` for the deployed frontend origin; wildcard origins are rejected.
-* 🔐 Authentication and rate limiting should be added before exposing the API to untrusted users.
+* 🔐 Protected API routes verify Supabase bearer tokens and analysis jobs are scoped to their verified owner. Rate limiting is not included.
 
 ---
 
@@ -633,9 +674,9 @@ Current limitations include:
 
 * GitHub analysis currently targets public repositories.
 * Static analysis primarily focuses on Python.
-* Analysis job state is held in memory.
+* Analysis job state is held in memory and expires; reports are not synced across devices or stored in user accounts.
 * AI functionality requires a configured Gemini API key.
-* No persistent job store, authentication, or rate limiting is included.
+* Rate limiting is not included.
 
 ---
 
