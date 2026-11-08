@@ -59,7 +59,8 @@ def _database_connection_options(database_url: str) -> tuple[str, str | None]:
     query = parse_qsl(parsed.query, keep_blank_values=True)
     ssl_mode = next((value for key, value in query if key == "sslmode"), None)
     query = [(key, value) for key, value in query if key != "sslmode"]
-    dsn = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+    scheme = "postgresql" if parsed.scheme == "postgresql+asyncpg" else parsed.scheme
+    dsn = urlunsplit((scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
     if ssl_mode in {"require", "verify-ca", "verify-full"}:
         return dsn, "verify-full" if ssl_mode == "verify-full" else "require"
     if ssl_mode in {"disable", "prefer", None}:

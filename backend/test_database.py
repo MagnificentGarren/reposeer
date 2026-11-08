@@ -35,6 +35,15 @@ def test_database_url_ssl_options(url, expected_ssl):
     assert ssl == expected_ssl
 
 
+def test_database_url_normalizes_sqlalchemy_asyncpg_scheme():
+    dsn, ssl = _database_connection_options(
+        "postgresql+asyncpg://db.example/reposeer?sslmode=require"
+    )
+
+    assert dsn == "postgresql://db.example/reposeer"
+    assert ssl == "require"
+
+
 def test_database_url_rejects_unknown_ssl_mode():
     with pytest.raises(ValueError, match="Unsupported DATABASE_URL sslmode"):
         _database_connection_options("postgresql://user:pass@db.example/db?sslmode=invalid")
