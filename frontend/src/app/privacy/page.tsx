@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import BackToHomeButton from "@/components/BackToHomeButton";
 import PublicFooter from "@/components/PublicFooter";
 
 export const metadata: Metadata = {
@@ -18,12 +19,7 @@ export default function PrivacyPage() {
             </div>
             <span className="text-2xl font-bold tracking-wider text-slate-100">REPOSEER</span>
           </Link>
-          <Link
-            href="/"
-            className="text-sm text-slate-400 transition-colors hover:text-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-          >
-            Back to home
-          </Link>
+          <BackToHomeButton />
         </div>
       </header>
 
@@ -34,15 +30,39 @@ export default function PrivacyPage() {
         <h1 className="mt-3 text-3xl font-bold text-slate-100 sm:text-4xl">
           Privacy &amp; Data Handling Notice
         </h1>
-        <p className="mt-8 text-base leading-relaxed text-slate-300">
-          Uploaded archives are processed temporarily and removed after analysis. Analysis
-          reports, which may include repository excerpts, are stored for up to 7 days and
-          can be deleted sooner. We retain account-linked usage records and keyed IP hashes
-          for up to 13 months to enforce limits and monitor service use.
-        </p>
+        <div className="mt-8 space-y-8">
+          <section aria-labelledby="uploaded-archives">
+            <h2 id="uploaded-archives" className="text-lg font-semibold text-slate-100">
+              Uploaded archives
+            </h2>
+            <p className="mt-2 leading-relaxed text-slate-300">
+              Archives are processed temporarily and removed after analysis.
+            </p>
+          </section>
+
+          <section aria-labelledby="analysis-reports">
+            <h2 id="analysis-reports" className="text-lg font-semibold text-slate-100">
+              Analysis reports
+            </h2>
+            <p className="mt-2 leading-relaxed text-slate-300">
+              Reports may include repository excerpts. They are stored for up to 7 days and
+              can be deleted sooner.
+            </p>
+          </section>
+
+          <section aria-labelledby="usage-records">
+            <h2 id="usage-records" className="text-lg font-semibold text-slate-100">
+              Usage records
+            </h2>
+            <p className="mt-2 leading-relaxed text-slate-300">
+              Account-linked usage records and keyed IP hashes are retained for up to 13
+              months to enforce limits and monitor service use.
+            </p>
+          </section>
+        </div>
       </main>
 
-      <PublicFooter />
+      <PublicFooter hidePrivacyLink />
     </div>
   );
 }
