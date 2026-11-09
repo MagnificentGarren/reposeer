@@ -1,3 +1,6 @@
+import asyncio
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -27,6 +30,41 @@ def test_persistent_endpoint_reports_missing_database_configuration(monkeypatch)
 
     assert response.status_code == 503
     assert "Database persistence is not configured" in response.json()["detail"]
+
+
+def test_api_starts_and_stops_embedded_analysis_worker(monkeypatch):
+    worker_started = threading.Event()
+    pool_closed = threading.Event()
+
+    class FakePool:
+        async def close(self):
+            pool_closed.set()
+
+    class FakeStore:
+        async def prune_expired(self):
+            return None
+
+    async def create_pool(_database_url):
+        return FakePool()
+
+    async def run_worker(store):
+        assert isinstance(store, FakeStore)
+        worker_started.set()
+        await asyncio.Event().wait()
+
+    async def run_maintenance(_store):
+        await asyncio.Event().wait()
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://test/db")
+    monkeypatch.setattr(main, "create_database_pool", create_pool)
+    monkeypatch.setattr(main, "DatabaseStore", lambda _pool: FakeStore())
+    monkeypatch.setattr(main, "run_worker_loop", run_worker)
+    monkeypatch.setattr(main, "run_database_maintenance", run_maintenance)
+
+    with TestClient(main.app):
+        assert worker_started.wait(timeout=2)
+
+    assert pool_closed.is_set()
 
 
 def test_cors_allows_configured_origin_only():

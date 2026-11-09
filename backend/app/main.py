@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from app.api import chat, inspect, interview
 from app.services.database import create_database_pool, run_database_maintenance, DatabaseStore
 from app.services.ingestion import MAX_ARCHIVE_SIZE_BYTES
+from app.worker import run_worker_loop
 
 
 def _configured_cors_origins() -> list[str]:
@@ -56,15 +57,23 @@ async def lifespan(application: FastAPI):
         await create_database_pool(database_url) if database_url else None
     )
     maintenance_task = None
+    analysis_worker_task = None
     if application.state.database_pool is not None:
         store = DatabaseStore(application.state.database_pool)
         await store.prune_expired()
         maintenance_task = asyncio.create_task(
             run_database_maintenance(store)
         )
+        analysis_worker_task = asyncio.create_task(run_worker_loop(store))
     try:
         yield
     finally:
+        if analysis_worker_task is not None:
+            analysis_worker_task.cancel()
+            try:
+                await analysis_worker_task
+            except asyncio.CancelledError:
+                pass
         if maintenance_task is not None:
             maintenance_task.cancel()
             try:

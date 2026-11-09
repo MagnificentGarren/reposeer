@@ -41,32 +41,36 @@ async def _maintain_temp_files(store: DatabaseStore) -> None:
 async def _heartbeat(store: DatabaseStore, job_id: str, worker_id: str) -> None:
     while True:
         await asyncio.sleep(max(1, ANALYSIS_LEASE_SECONDS // 3))
-        if not await store.heartbeat_analysis(job_id, worker_id):
-            logger.warning("Worker lease for analysis job %s was lost", job_id)
-            return
+        try:
+            if not await store.heartbeat_analysis(job_id, worker_id):
+                logger.warning("Worker lease for analysis job %s was lost", job_id)
+                return
+        except (asyncpg.PostgresError, OSError):
+            logger.exception("Could not renew worker lease for analysis job %s", job_id)
 
 
-async def run_worker() -> None:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL must be configured for the analysis worker.")
-
-    pool = await create_database_pool(database_url)
-    store = DatabaseStore(pool)
+async def run_worker_loop(store: DatabaseStore) -> None:
     worker_id = str(uuid.uuid4())
     maintenance_task = asyncio.create_task(_maintain_temp_files(store))
-    database_maintenance_task = asyncio.create_task(run_database_maintenance(store))
-    active_job_ids = await store.get_active_job_ids()
-    await asyncio.to_thread(
-        IngestionService.cleanup_expired_temp_dirs,
-        TEMP_FILE_RETENTION_SECONDS,
-        active_job_ids,
-    )
+    try:
+        active_job_ids = await store.get_active_job_ids()
+        await asyncio.to_thread(
+            IngestionService.cleanup_expired_temp_dirs,
+            TEMP_FILE_RETENTION_SECONDS,
+            active_job_ids,
+        )
+    except (asyncpg.PostgresError, OSError):
+        logger.exception("Initial cleanup of abandoned analysis directories failed")
     logger.info("Analysis worker %s started", worker_id)
 
     try:
         while True:
-            job = await store.claim_next_analysis(worker_id)
+            try:
+                job = await store.claim_next_analysis(worker_id)
+            except (asyncpg.PostgresError, OSError):
+                logger.exception("Analysis worker could not claim a job")
+                await asyncio.sleep(QUEUE_POLL_SECONDS * 5)
+                continue
             if job is None:
                 await asyncio.sleep(QUEUE_POLL_SECONDS)
                 continue
@@ -79,13 +83,16 @@ async def run_worker() -> None:
                 raise
             except Exception:
                 logger.exception("Analysis worker failed while processing job %s", job_id)
-                await store.update_job(
-                    job_id,
-                    status="failed",
-                    progress=0,
-                    message="Analysis failed because the worker could not process the saved job.",
-                    worker_id=worker_id,
-                )
+                try:
+                    await store.update_job(
+                        job_id,
+                        status="failed",
+                        progress=0,
+                        message="Analysis failed because the worker could not process the saved job.",
+                        worker_id=worker_id,
+                    )
+                except (asyncpg.PostgresError, OSError):
+                    logger.exception("Could not save failure state for analysis job %s", job_id)
             finally:
                 heartbeat_task.cancel()
                 try:
@@ -94,11 +101,24 @@ async def run_worker() -> None:
                     pass
     finally:
         maintenance_task.cancel()
-        database_maintenance_task.cancel()
         try:
             await maintenance_task
         except asyncio.CancelledError:
             pass
+
+
+async def run_worker() -> None:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL must be configured for the analysis worker.")
+
+    pool = await create_database_pool(database_url)
+    store = DatabaseStore(pool)
+    database_maintenance_task = asyncio.create_task(run_database_maintenance(store))
+    try:
+        await run_worker_loop(store)
+    finally:
+        database_maintenance_task.cancel()
         try:
             await database_maintenance_task
         except asyncio.CancelledError:
