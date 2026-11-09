@@ -74,7 +74,12 @@ def _database_connection_options(database_url: str) -> tuple[str, str | None]:
 
 async def create_database_pool(database_url: str) -> asyncpg.Pool:
     dsn, ssl = _database_connection_options(database_url)
-    pool = await asyncpg.create_pool(dsn=dsn, ssl=ssl, init=_configure_connection)
+    pool = await asyncpg.create_pool(
+        dsn=dsn,
+        ssl=ssl,
+        init=_configure_connection,
+        statement_cache_size=0,
+    )
     try:
         await apply_migrations(pool)
     except Exception:

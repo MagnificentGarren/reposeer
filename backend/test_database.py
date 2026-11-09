@@ -1,5 +1,9 @@
+import asyncio
+
 import pytest
 from fastapi import HTTPException
+
+import app.services.database as database
 
 from app.services.database import (
     _active_analysis_error,
@@ -59,3 +63,24 @@ def test_database_url_normalizes_sqlalchemy_asyncpg_scheme():
 def test_database_url_rejects_unknown_ssl_mode():
     with pytest.raises(ValueError, match="Unsupported DATABASE_URL sslmode"):
         _database_connection_options("postgresql://user:pass@db.example/db?sslmode=invalid")
+
+
+def test_database_pool_disables_prepared_statement_cache_for_pooler(monkeypatch):
+    received_options = {}
+    pool = object()
+
+    async def create_pool(**options):
+        received_options.update(options)
+        return pool
+
+    async def apply_migrations(_pool):
+        assert _pool is pool
+
+    monkeypatch.setattr(database.asyncpg, "create_pool", create_pool)
+    monkeypatch.setattr(database, "apply_migrations", apply_migrations)
+
+    result = asyncio.run(
+        database.create_database_pool("postgresql://user:pass@pooler.example/db")
+    )
+    assert result is pool
+    assert received_options["statement_cache_size"] == 0
