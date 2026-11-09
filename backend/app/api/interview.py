@@ -16,7 +16,10 @@ def get_gemini_client():
             status_code=503,
             detail="AI features are unavailable because GEMINI_API_KEY is not configured.",
         )
-    return genai.Client(api_key=api_key)
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(api_version="v1beta"),
+    )
 
 LEAKED_INTERVIEWER_PREAMBLE = re.compile(
     r"^\s*You are Reposeer Technical Interviewer, an elite lead engineer conducting "

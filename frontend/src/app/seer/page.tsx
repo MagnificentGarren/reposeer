@@ -318,6 +318,16 @@ export default function SeerHubPage() {
               >
                 Resume analysis
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveJob(null);
+                  setValidationError(null);
+                }}
+                className="rounded-xl border border-emerald-500/30 px-5 py-3 font-semibold text-emerald-200 hover:bg-emerald-950/60"
+              >
+                Back to repository import
+              </button>
               {activeJob.is_stale && (
                 <button
                   type="button"

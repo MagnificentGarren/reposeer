@@ -18,7 +18,10 @@ def get_gemini_client() -> genai.Client:
             status_code=500,
             detail="GEMINI_API_KEY environment variable is missing on the server.",
         )
-    return genai.Client(api_key=api_key)
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(api_version="v1beta"),
+    )
 
 
 @router.post("/chat")

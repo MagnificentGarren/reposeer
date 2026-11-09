@@ -153,14 +153,42 @@ function buildPythonRequiredMessage(source: "GitHub" | "ZIP") {
   return "Analysis requires at least one Python file in the uploaded archive. Please upload a ZIP that contains Python source files, not just documentation or non-Python assets.";
 }
 
+async function getTerminalAnalysisResult(jobId: string, source?: "GitHub" | "ZIP"): Promise<unknown | null> {
+  const job = await getAnalysisJob(jobId);
+  if (job.status === "completed") {
+    if (!job.result || typeof job.result !== "object" || Array.isArray(job.result)) {
+      throw new Error("The analysis completed, but its saved result could not be loaded.");
+    }
+    clearRememberedAnalysisJob();
+    return { ...job.result, id: jobId };
+  }
+  if (job.status === "failed") {
+    clearRememberedAnalysisJob();
+    const message = job.message || "Inspection job encountered an error on the server.";
+    throw new Error(
+      message.toLowerCase().includes("requires at least one python file")
+        ? buildPythonRequiredMessage(source || "ZIP")
+        : message,
+    );
+  }
+  return null;
+}
+
 async function watchAnalysisJob(
   jobId: string,
   onProgress?: (progress: number, message: string) => void,
   source?: "GitHub" | "ZIP",
 ): Promise<unknown> {
-  const streamResponse = await fetch(`${API_BASE_URL}/api/inspect/stream/${encodeURIComponent(jobId)}`, {
-    headers: await getAuthorizationHeaders(),
-  });
+  let streamResponse: Response;
+  try {
+    streamResponse = await fetch(`${API_BASE_URL}/api/inspect/stream/${encodeURIComponent(jobId)}`, {
+      headers: await getAuthorizationHeaders(),
+    });
+  } catch (error) {
+    const result = await getTerminalAnalysisResult(jobId, source);
+    if (result !== null) return result;
+    throw error;
+  }
   if (!streamResponse.ok) {
     const errorData = await streamResponse.json().catch(() => ({}));
     throw new Error(typeof errorData.detail === "string" ? errorData.detail : "Unable to read inspection progress.");
@@ -174,7 +202,15 @@ async function watchAnalysisJob(
   let pending = "";
 
   while (true) {
-    const { value, done } = await reader.read();
+    let value: Uint8Array | undefined;
+    let done: boolean;
+    try {
+      ({ value, done } = await reader.read());
+    } catch (error) {
+      const result = await getTerminalAnalysisResult(jobId, source);
+      if (result !== null) return result;
+      throw error;
+    }
     pending += decoder.decode(value, { stream: !done });
     const frames = pending.split(/\r?\n\r?\n/);
     pending = frames.pop() || "";
@@ -227,6 +263,8 @@ async function watchAnalysisJob(
     if (done) break;
   }
 
+  const result = await getTerminalAnalysisResult(jobId, source);
+  if (result !== null) return result;
   throw new Error("Connection to the inspection telemetry stream was lost.");
 }
 
