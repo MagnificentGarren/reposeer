@@ -15,7 +15,9 @@ class FakeDatabaseStore:
         self.ai_actions = []
         self.analysis_usage = []
 
-    async def create_analysis(self, owner_id, ip_hash, job_id=None):
+    async def create_analysis(
+        self, owner_id, ip_hash, job_id=None, *, input_type=None, input_payload=None, input_archive=None
+    ):
         if any(
             job["owner_id"] == owner_id and job["status"] in ("queued", "processing")
             for job in self.jobs.values()
@@ -34,12 +36,18 @@ class FakeDatabaseStore:
             "progress": 5,
             "message": "Initializing analysis pipeline...",
             "updated_at": datetime.now(timezone.utc),
+            "input_type": input_type,
+            "input_payload": input_payload,
+            "input_archive": input_archive,
+            "worker_id": None,
         }
         self.analysis_usage.append(job_id)
         return job_id
 
-    async def update_job(self, job_id, *, status, progress, message, result=None):
+    async def update_job(self, job_id, *, status, progress, message, result=None, worker_id=None):
         job = self.jobs[job_id]
+        if worker_id is not None and job.get("worker_id") != worker_id:
+            return False
         if job["status"] not in ("queued", "processing"):
             return False
         job.update(status=status, progress=progress, message=message)
@@ -49,6 +57,8 @@ class FakeDatabaseStore:
             self.reports[job_id] = {"id": job_id, "result": result, "owner_id": job["owner_id"]}
         elif status == "failed":
             self.analysis_usage = [usage_id for usage_id in self.analysis_usage if usage_id != job_id]
+        if status in ("completed", "failed"):
+            job.update(input_payload=None, input_archive=None, worker_id=None)
         return True
 
     async def get_job(self, job_id, owner_id):
@@ -59,7 +69,7 @@ class FakeDatabaseStore:
         updated_at = job.get("updated_at", datetime.now(timezone.utc))
         result["updated_at"] = updated_at.isoformat()
         result["is_stale"] = (
-            job["status"] in ("queued", "processing")
+            job["status"] == "processing"
             and datetime.now(timezone.utc) - updated_at
             > timedelta(seconds=ANALYSIS_STALE_SECONDS)
         )
@@ -80,7 +90,8 @@ class FakeDatabaseStore:
             "progress": job["progress"],
             "message": job["message"],
             "updated_at": job["updated_at"].isoformat(),
-            "is_stale": datetime.now(timezone.utc) - job["updated_at"]
+            "is_stale": job["status"] == "processing"
+            and datetime.now(timezone.utc) - job["updated_at"]
             > timedelta(seconds=ANALYSIS_STALE_SECONDS),
         }
 
@@ -93,12 +104,12 @@ class FakeDatabaseStore:
         if datetime.now(timezone.utc) - job["updated_at"] <= timedelta(seconds=ANALYSIS_STALE_SECONDS):
             return False
         job.update(
-            status="failed",
-            progress=0,
-            message="Analysis was recovered after no progress was reported.",
+            status="queued",
+            progress=5,
+            message="Analysis was requeued after worker progress stopped.",
+            worker_id=None,
             updated_at=datetime.now(timezone.utc),
         )
-        self.analysis_usage = [usage_id for usage_id in self.analysis_usage if usage_id != job_id]
         return True
 
     async def consume_ai_action(self, owner_id, ip_hash, action):

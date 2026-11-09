@@ -30,10 +30,13 @@ class IngestionService:
 
     @staticmethod
     def clone_github_repo(
-        repo_url: str, progress_callback: Callable[[float, float, str], None] | None = None
+        repo_url: str,
+        progress_callback: Callable[[float, float, str], None] | None = None,
+        job_id: str | None = None,
     ) -> str:
         """Clones a public GitHub repo into a temporary system directory."""
-        temp_dir = tempfile.mkdtemp(prefix="reposeer_repo_")
+        prefix = f"reposeer_repo_{job_id}_" if job_id else "reposeer_repo_"
+        temp_dir = tempfile.mkdtemp(prefix=prefix)
         try:
             class CloneProgress(RemoteProgress):
                 def update(self, op_code, cur_count, max_count=None, message=""):
@@ -86,30 +89,10 @@ class IngestionService:
     ) -> None:
         """Validate and extract an uploaded archive within configured limits."""
         destination_path = Path(destination).resolve()
+        IngestionService.validate_zip_archive(archive, destination_path)
         entries = archive.infolist()
         file_entries = [entry for entry in entries if not entry.is_dir()]
-
-        if len(file_entries) > MAX_ARCHIVE_FILES:
-            raise ValueError(
-                f"The uploaded ZIP contains too many files. The limit is {MAX_ARCHIVE_FILES:,}."
-            )
-
         extracted_size = sum(entry.file_size for entry in file_entries)
-        if extracted_size > MAX_EXTRACTED_SIZE_BYTES:
-            limit_mb = MAX_EXTRACTED_SIZE_BYTES // (1024 * 1024)
-            raise ValueError(
-                f"The uploaded ZIP expands beyond the {limit_mb}MB extraction limit."
-            )
-
-        for entry in entries:
-            entry_path = Path(entry.filename)
-            target_path = (destination_path / entry_path).resolve()
-            if target_path != destination_path and destination_path not in target_path.parents:
-                raise ValueError("The uploaded ZIP contains an unsafe path.")
-
-            unix_mode = (entry.external_attr >> 16) & 0o170000
-            if unix_mode == 0o120000:
-                raise ValueError("The uploaded ZIP contains an unsupported symbolic link.")
 
         destination_path.mkdir(parents=True, exist_ok=True)
         bytes_extracted = 0
@@ -130,6 +113,34 @@ class IngestionService:
             progress_callback(bytes_extracted, extracted_size)
 
     @staticmethod
+    def validate_zip_archive(archive: zipfile.ZipFile, root: Path | None = None) -> None:
+        """Validate archive size, paths, and file types without extracting it."""
+        destination_path = (root or Path(tempfile.gettempdir())).resolve()
+        entries = archive.infolist()
+        file_entries = [entry for entry in entries if not entry.is_dir()]
+
+        if len(file_entries) > MAX_ARCHIVE_FILES:
+            raise ValueError(
+                f"The uploaded ZIP contains too many files. The limit is {MAX_ARCHIVE_FILES:,}."
+            )
+
+        extracted_size = sum(entry.file_size for entry in file_entries)
+        if extracted_size > MAX_EXTRACTED_SIZE_BYTES:
+            limit_mb = MAX_EXTRACTED_SIZE_BYTES // (1024 * 1024)
+            raise ValueError(
+                f"The uploaded ZIP expands beyond the {limit_mb}MB extraction limit."
+            )
+
+        for entry in entries:
+            target_path = (destination_path / Path(entry.filename)).resolve()
+            if target_path != destination_path and destination_path not in target_path.parents:
+                raise ValueError("The uploaded ZIP contains an unsafe path.")
+
+            unix_mode = (entry.external_attr >> 16) & 0o170000
+            if unix_mode == 0o120000:
+                raise ValueError("The uploaded ZIP contains an unsupported symbolic link.")
+
+    @staticmethod
     def cleanup_temp_dir(temp_dir: str) -> None:
         """Removes temporary repository clone directory."""
         temp_path = Path(temp_dir).resolve()
@@ -142,13 +153,20 @@ class IngestionService:
             shutil.rmtree(temp_path)
 
     @staticmethod
-    def cleanup_expired_temp_dirs(max_age_seconds: int) -> None:
+    def cleanup_expired_temp_dirs(
+        max_age_seconds: int, active_job_ids: set[str] | None = None
+    ) -> None:
         """Removes abandoned Reposeer temp directories older than the retention window."""
         temp_root = Path(tempfile.gettempdir()).resolve()
         current_time = time.time()
         for prefix in ("reposeer_repo_", "reposeer_upload_"):
             for temp_path in temp_root.glob(f"{prefix}*"):
                 try:
+                    if active_job_ids and any(
+                        temp_path.name.startswith(f"{prefix}{job_id}_")
+                        for job_id in active_job_ids
+                    ):
+                        continue
                     if temp_path.is_dir() and current_time - temp_path.stat().st_mtime > max_age_seconds:
                         shutil.rmtree(temp_path, ignore_errors=True)
                 except OSError:

@@ -254,7 +254,9 @@ flowchart LR
     Frontend --> Chat[💬 Casual Chat API]
     Frontend --> Interview[🎯 Interview API]
 
-    Inspect --> Ingestion[📦 Repository Ingestion]
+    Inspect --> Queue[(🗄️ PostgreSQL durable job queue)]
+    Queue --> Worker[⚙️ Separate analysis worker]
+    Worker --> Ingestion[📦 Repository Ingestion]
     Ingestion --> Parser[🌳 Tree-sitter AST Parser]
     Parser --> Graph[🕸️ Dependency Graph Mapper]
     Graph --> Report[📊 Inspection Report]
@@ -398,7 +400,7 @@ Set the Supabase project URL and public anon key in both the server-only and `NE
 | `GEMINI_API_KEY` | Google Gemini key for chat and interview features | unset |
 | `SUPABASE_URL` | Supabase project URL used by the backend to verify access tokens | unset |
 | `SUPABASE_ANON_KEY` | Supabase public anon key sent to the Auth user-verification endpoint | unset |
-| `DATABASE_URL` | PostgreSQL connection string used for reports, jobs, and usage data; Compose supplies its local database when unset | Compose local database |
+| `DATABASE_URL` | PostgreSQL connection string used for reports, durable queued jobs, uploaded archives, and usage data; the API and worker must use the same database | Compose local database |
 | `REPOSEER_RATE_LIMIT_HMAC_KEY` | Optional stable secret for hashing client IPs in usage records; defaults to a key derived from `DATABASE_URL` | derived |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Local Compose database settings only; choose a strong local password | local defaults |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase URL used by the frontend auth client | unset |
@@ -411,9 +413,25 @@ Set the Supabase project URL and public anon key in both the server-only and `NE
 | `REPOSEER_REPORT_RETENTION_DAYS` | Report retention period; expired reports are deleted automatically | `7` |
 | `REPOSEER_ANALYSIS_STALE_SECONDS` | Time without reported job progress before recovery is allowed | `300` |
 
-The initial invited-beta quotas are **3 successful analyses per day and 20 per month per account**, **1 concurrent analysis**, and **10 AI actions per day and 100 per month per account**. Shared IP limits are **10 successful analyses per day and 100 per month**, plus **30 AI actions per day and 300 per month**. A ZIP is limited to 25 MB compressed, 100 MB extracted, and 2,000 files. Daily and monthly quota exhaustion returns HTTP 429; an existing active analysis returns HTTP 409 instead. Analysis usage is reserved at start and removed when the attempt fails or is safely recovered, so unsuccessful analyses do not consume quota.
+The initial invited-beta quotas are **3 successful analyses per day and 20 per month per account**, **1 concurrent analysis**, and **10 AI actions per day and 100 per month per account**. Shared IP limits are **10 successful analyses per day and 100 per month**, plus **30 AI actions per day and 300 per month**. A ZIP is limited to 25 MB compressed, 100 MB extracted, and 2,000 files. Daily and monthly quota exhaustion returns HTTP 429; an existing active analysis returns HTTP 409 instead. Analysis usage is reserved at start and removed when an attempt ultimately fails; worker restarts and stale-job requeues do not consume additional quota.
 
-Analysis archives and Git checkouts are temporary and removed after analysis. Progress is recorded at clone and file-parsing milestones; the stale threshold is configurable with `REPOSEER_ANALYSIS_STALE_SECONDS`. Signed-in users can reconnect to their active analysis from Seer Hub after a refresh or dropped connection. Recovery is available only after the job has reported no progress for the configured interval; the backend fences off late updates and report writes from recovered workers. Reports, including repository excerpts used for the AI context, are private to the verified account and retained for 7 days by default. Users can review and delete their saved reports from **Seer Hub → View saved reports**. Usage records keep account IDs and keyed IP hashes for up to 13 months for quota enforcement and operational monitoring.
+Analysis jobs are inserted into PostgreSQL with their source information in the same transaction as the quota reservation. A separate worker claims jobs using PostgreSQL row locks and renewable leases; interrupted jobs become claimable again after the lease expires, with up to three processing attempts. ZIP bytes are stored in the job row until it completes or fails, then cleared. Workers extract archives and clone repositories into temporary folders, which are removed when work ends and swept if older than 24 hours. There is no Redis requirement: PostgreSQL is both the durable job queue and the database for reports and usage data.
+
+The API reads progress from PostgreSQL, so any API instance can report progress for work handled by any worker. The browser reconnects by polling the saved job state and retries temporary network/API errors with a bounded backoff. The SSE endpoint is also available for clients that prefer streaming. If a worker stops updating a job, its lease expires and another worker retries it. Signed-in users can reconnect to their active analysis from Seer Hub after a refresh or dropped connection. The recovery action requeues a stale job instead of discarding it. Reports, including repository excerpts used for the AI context, are private to the verified account and retained for 7 days by default. Users can review and delete their saved reports from **Seer Hub → View saved reports**. Usage records keep account IDs and keyed IP hashes for up to 13 months for quota enforcement and operational monitoring.
+
+### Deploying the durable analysis worker
+
+The local Compose stack starts PostgreSQL, the API, one worker, and the frontend. For a hosted service:
+
+1. Provision a managed PostgreSQL instance with persistent storage, automated backups, and enough capacity for job rows, reports, and active ZIP uploads. The current compressed upload limit is 25 MB per job; the ZIP is stored in PostgreSQL only until the job reaches a terminal state.
+2. Set `DATABASE_URL` to a private PostgreSQL connection string available to **both** the API service and every worker service. For managed databases, use the provider's recommended TLS-enabled URL. Do not expose PostgreSQL publicly unless your provider explicitly requires it; prefer private networking or a restricted network allowlist.
+3. Deploy the backend image twice: run the existing API command for the API service and `python -m app.worker` for the worker service. Supply the same database URL, migration-capable database role, and archive-limit settings to both. The API and worker run migrations at startup; keep their code versions aligned during rollouts.
+4. Ensure the worker has outbound HTTPS access to GitHub for public repository clones. The API needs to reach Supabase Auth if token verification is configured. The worker does not need a browser-facing port or a public URL.
+5. Start at one worker replica. Add worker replicas when queue latency or throughput requires it; PostgreSQL row locking coordinates claims across replicas. Use the same `DATABASE_URL` on all of them. Avoid setting a very low database connection limit: each API and worker process maintains its own pool.
+6. Configure a process supervisor/platform restart policy for both API and worker. Monitor worker logs, database connectivity, active/failed job counts, expired report cleanup, and disk usage. The worker must stay running; API health alone does not establish that queued work is being consumed.
+7. In production, provision always-on worker capacity before inviting users who expect queued jobs to finish. A stopped worker does not lose jobs, but jobs cannot complete until a worker is available. Keep backups and test database restore procedures; the queue and reports are durable only to the same degree as PostgreSQL.
+
+No separate Redis, object-storage bucket, shared temporary filesystem, or worker-facing HTTP route is required by this implementation.
 
 ⚠️ **Never commit API keys, credentials, or other secrets to GitHub.**
 

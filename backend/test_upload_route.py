@@ -20,7 +20,7 @@ def authenticated_test_user(fake_database_store):
     app.dependency_overrides.pop(get_current_user, None)
 
 
-def test_upload_zip_endpoint_accepts_archive():
+def test_upload_zip_endpoint_accepts_archive(fake_database_store):
     archive_buffer = BytesIO()
     with zipfile.ZipFile(archive_buffer, "w") as archive:
         archive.writestr("sample_app/__init__.py", "VALUE = 1\n")
@@ -37,7 +37,26 @@ def test_upload_zip_endpoint_accepts_archive():
     assert response.status_code == 200, response.text
     data = response.json()
     assert "job_id" in data
-    assert data["status"] == "processing"
+    assert data["status"] == "queued"
+    assert fake_database_store.jobs[data["job_id"]]["input_type"] == "zip"
+    assert fake_database_store.jobs[data["job_id"]]["input_archive"]
+
+
+def test_github_endpoint_persists_repository_as_queued_work(fake_database_store):
+    repo_url = "https://github.com/example/repo"
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/inspect/github",
+            json={"repo_url": repo_url},
+        )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["status"] == "queued"
+    job = fake_database_store.jobs[data["job_id"]]
+    assert job["input_type"] == "github"
+    assert job["input_payload"] == {"repo_url": repo_url}
 
 
 def test_upload_zip_endpoint_rejects_archive_without_python_file():
@@ -144,6 +163,7 @@ def test_stale_progress_stream_closes_for_safe_recovery(fake_database_store):
         "message": "Parsing Python files...",
         "updated_at": datetime.now(timezone.utc)
         - timedelta(seconds=ANALYSIS_STALE_SECONDS + 1),
+        "worker_id": "interrupted-worker",
     }
 
     with TestClient(app) as client:
@@ -170,12 +190,17 @@ def test_stale_analysis_can_be_recovered_and_late_completion_is_fenced(fake_data
 
     assert response.status_code == 200
     assert response.json()["recovered"] is True
-    assert fake_database_store.jobs[job_id]["status"] == "failed"
-    assert job_id not in fake_database_store.analysis_usage
+    assert fake_database_store.jobs[job_id]["status"] == "queued"
+    assert fake_database_store.jobs[job_id]["worker_id"] is None
+    assert job_id in fake_database_store.analysis_usage
 
-    asyncio.run(_save_analysis_result(job_id, {"files_analyzed": 1}, fake_database_store))
+    asyncio.run(
+        _save_analysis_result(
+            job_id, {"files_analyzed": 1}, fake_database_store, "interrupted-worker"
+        )
+    )
 
-    assert fake_database_store.jobs[job_id]["status"] == "failed"
+    assert fake_database_store.jobs[job_id]["status"] == "queued"
     assert job_id not in fake_database_store.reports
 
 

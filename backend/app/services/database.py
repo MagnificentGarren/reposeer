@@ -23,6 +23,8 @@ IP_AI_ACTIONS_PER_DAY = 30
 IP_AI_ACTIONS_PER_MONTH = 300
 REPORT_RETENTION_DAYS = 7
 ANALYSIS_STALE_SECONDS = 300
+ANALYSIS_LEASE_SECONDS = 120
+ANALYSIS_MAX_ATTEMPTS = 3
 
 
 def _positive_int_from_env(name: str, default: int) -> int:
@@ -148,7 +150,16 @@ class DatabaseStore:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
 
-    async def create_analysis(self, owner_id: str, ip_hash: str, job_id: str | None = None) -> str:
+    async def create_analysis(
+        self,
+        owner_id: str,
+        ip_hash: str,
+        job_id: str | None = None,
+        *,
+        input_type: str | None = None,
+        input_payload: dict | None = None,
+        input_archive: bytes | None = None,
+    ) -> str:
         job_uuid = UUID(job_id) if job_id else uuid4()
         owner_uuid = UUID(owner_id)
 
@@ -161,25 +172,6 @@ class DatabaseStore:
                         lock_key,
                     )
 
-                stale_jobs = await connection.fetch(
-                    """
-                    UPDATE analysis_jobs
-                    SET status = 'failed', progress = 0,
-                        message = 'Analysis was recovered after no progress was reported.',
-                        updated_at = now()
-                    WHERE owner_id = $1
-                      AND status IN ('queued', 'processing')
-                      AND updated_at < now() - ($2 * interval '1 second')
-                    RETURNING id
-                    """,
-                    owner_uuid,
-                    ANALYSIS_STALE_SECONDS,
-                )
-                if stale_jobs:
-                    await connection.execute(
-                        "DELETE FROM usage_records WHERE analysis_job_id = ANY($1::uuid[])",
-                        [row["id"] for row in stale_jobs],
-                    )
                 active_analyses = await connection.fetchval(
                     """
                     SELECT count(*) FROM analysis_jobs
@@ -207,11 +199,17 @@ class DatabaseStore:
 
                 await connection.execute(
                     """
-                    INSERT INTO analysis_jobs (id, owner_id, status, progress, message)
-                    VALUES ($1, $2, 'queued', 5, 'Initializing analysis pipeline...')
+                    INSERT INTO analysis_jobs (
+                        id, owner_id, status, progress, message,
+                        input_type, input_payload, input_archive
+                    )
+                    VALUES ($1, $2, 'queued', 5, 'Initializing analysis pipeline...', $3, $4, $5)
                     """,
                     job_uuid,
                     owner_uuid,
+                    input_type,
+                    input_payload,
+                    input_archive,
                 )
                 await connection.execute(
                     """
@@ -223,6 +221,89 @@ class DatabaseStore:
                     job_uuid,
                 )
         return str(job_uuid)
+
+    async def claim_next_analysis(self, worker_id: str) -> dict | None:
+        async with self.pool.acquire() as connection:
+            async with connection.transaction():
+                exhausted = await connection.fetch(
+                    """
+                    UPDATE analysis_jobs
+                    SET status = 'failed', progress = 0,
+                        message = 'Analysis failed after repeated worker interruptions.',
+                        worker_id = NULL, lease_until = NULL,
+                        input_payload = NULL, input_archive = NULL, updated_at = now()
+                    WHERE status = 'processing'
+                      AND lease_until <= now()
+                      AND attempt_count >= $1
+                    RETURNING id
+                    """,
+                    ANALYSIS_MAX_ATTEMPTS,
+                )
+                if exhausted:
+                    await connection.execute(
+                        "DELETE FROM usage_records WHERE analysis_job_id = ANY($1::uuid[])",
+                        [row["id"] for row in exhausted],
+                    )
+
+                job = await connection.fetchrow(
+                    """
+                    SELECT id, input_type, input_payload, input_archive, status
+                    FROM analysis_jobs
+                    WHERE input_type IS NOT NULL
+                      AND attempt_count < $1
+                      AND (
+                          status = 'queued'
+                          OR (status = 'processing' AND lease_until <= now())
+                      )
+                    ORDER BY created_at
+                    LIMIT 1
+                    FOR UPDATE SKIP LOCKED
+                    """,
+                    ANALYSIS_MAX_ATTEMPTS,
+                )
+                if not job:
+                    return None
+
+                await connection.execute(
+                    """
+                    UPDATE analysis_jobs
+                    SET status = 'processing', progress = 5,
+                        message = CASE
+                            WHEN $2 THEN 'Retrying analysis after a worker interruption...'
+                            ELSE 'Worker started analysis...'
+                        END,
+                        worker_id = $3,
+                        lease_until = now() + ($4 * interval '1 second'),
+                        attempt_count = attempt_count + 1,
+                        updated_at = now()
+                    WHERE id = $1
+                    """,
+                    job["id"],
+                    job["status"] == "processing",
+                    worker_id,
+                    ANALYSIS_LEASE_SECONDS,
+                )
+                return {
+                    "job_id": str(job["id"]),
+                    "input_type": job["input_type"],
+                    "input_payload": job["input_payload"],
+                    "input_archive": job["input_archive"],
+                }
+
+    async def heartbeat_analysis(self, job_id: str, worker_id: str) -> bool:
+        updated_id = await self.pool.fetchval(
+            """
+            UPDATE analysis_jobs
+            SET lease_until = now() + ($3 * interval '1 second'),
+                updated_at = now()
+            WHERE id = $1 AND worker_id = $2 AND status = 'processing'
+            RETURNING id
+            """,
+            UUID(job_id),
+            worker_id,
+            ANALYSIS_LEASE_SECONDS,
+        )
+        return updated_id is not None
 
     async def consume_ai_action(self, owner_id: str, ip_hash: str, action: str) -> None:
         owner_uuid = UUID(owner_id)
@@ -300,6 +381,7 @@ class DatabaseStore:
         progress: int,
         message: str,
         result: dict | None = None,
+        worker_id: str | None = None,
     ) -> bool:
         job_uuid = UUID(job_id)
         async with self.pool.acquire() as connection:
@@ -307,14 +389,20 @@ class DatabaseStore:
                 updated_id = await connection.fetchval(
                     """
                     UPDATE analysis_jobs
-                    SET status = $2, progress = $3, message = $4, updated_at = now()
+                    SET status = $2, progress = $3, message = $4, updated_at = now(),
+                        worker_id = CASE WHEN $2 IN ('completed', 'failed') THEN NULL ELSE worker_id END,
+                        lease_until = CASE WHEN $2 IN ('completed', 'failed') THEN NULL ELSE lease_until END,
+                        input_payload = CASE WHEN $2 IN ('completed', 'failed') THEN NULL ELSE input_payload END,
+                        input_archive = CASE WHEN $2 IN ('completed', 'failed') THEN NULL ELSE input_archive END
                     WHERE id = $1 AND status IN ('queued', 'processing')
+                      AND ($5::text IS NULL OR worker_id = $5)
                     RETURNING id
                     """,
                     job_uuid,
                     status,
                     progress,
                     message,
+                    worker_id,
                 )
                 if updated_id is None:
                     return False
@@ -342,7 +430,8 @@ class DatabaseStore:
         row = await self.pool.fetchrow(
             """
             SELECT id, status, progress, message, updated_at,
-                   updated_at < now() - ($2 * interval '1 second') AS is_stale
+                   status = 'processing'
+                       AND updated_at < now() - ($2 * interval '1 second') AS is_stale
             FROM analysis_jobs
             WHERE owner_id = $1 AND status IN ('queued', 'processing')
             ORDER BY updated_at DESC
@@ -373,21 +462,24 @@ class DatabaseStore:
                 recovered_id = await connection.fetchval(
                     """
                     UPDATE analysis_jobs
-                    SET status = 'failed', progress = 0,
-                        message = 'Analysis was recovered after no progress was reported.',
+                    SET status = 'queued', progress = 5,
+                        message = 'Analysis was requeued after worker progress stopped.',
+                        worker_id = NULL, lease_until = NULL,
                         updated_at = now()
                     WHERE id = $1 AND owner_id = $2
-                      AND status IN ('queued', 'processing')
+                      AND status = 'processing'
+                      AND attempt_count < $4
                       AND updated_at < now() - ($3 * interval '1 second')
                     RETURNING id
                     """,
                     UUID(job_id),
                     owner_uuid,
                     ANALYSIS_STALE_SECONDS,
+                    ANALYSIS_MAX_ATTEMPTS,
                 )
                 if recovered_id is None:
                     state = await connection.fetchrow(
-                        "SELECT status FROM analysis_jobs WHERE id = $1 AND owner_id = $2",
+                        "SELECT status, attempt_count FROM analysis_jobs WHERE id = $1 AND owner_id = $2",
                         UUID(job_id),
                         owner_uuid,
                     )
@@ -395,19 +487,33 @@ class DatabaseStore:
                         return None
                     if state["status"] not in ("queued", "processing"):
                         return "not_active"
+                    if state["status"] == "processing" and state["attempt_count"] >= ANALYSIS_MAX_ATTEMPTS:
+                        await connection.execute(
+                            """
+                            UPDATE analysis_jobs
+                            SET status = 'failed', progress = 0,
+                                message = 'Analysis failed after repeated worker interruptions.',
+                                worker_id = NULL, lease_until = NULL,
+                                input_payload = NULL, input_archive = NULL, updated_at = now()
+                            WHERE id = $1 AND owner_id = $2 AND status = 'processing'
+                            """,
+                            UUID(job_id),
+                            owner_uuid,
+                        )
+                        await connection.execute(
+                            "DELETE FROM usage_records WHERE analysis_job_id = $1",
+                            UUID(job_id),
+                        )
+                        return "not_active"
                     return False
 
-                await connection.execute(
-                    "DELETE FROM usage_records WHERE analysis_job_id = $1",
-                    recovered_id,
-                )
         return True
 
     async def get_job(self, job_id: str, owner_id: str) -> dict | None:
         row = await self.pool.fetchrow(
             """
             SELECT j.id, j.status, j.progress, j.message, j.updated_at, r.result,
-                   j.status IN ('queued', 'processing')
+                   j.status = 'processing'
                        AND j.updated_at < now() - ($3 * interval '1 second') AS is_stale
             FROM analysis_jobs j
             LEFT JOIN reports r  ON r.analysis_job_id = j.id
@@ -506,6 +612,12 @@ class DatabaseStore:
             await connection.execute(
                 "DELETE FROM usage_records WHERE created_at < now() - interval '13 months'"
             )
+
+    async def get_active_job_ids(self) -> set[str]:
+        rows = await self.pool.fetch(
+            "SELECT id FROM analysis_jobs WHERE status IN ('queued', 'processing')"
+        )
+        return {str(row["id"]) for row in rows}
 
 
 async def get_database_store(request: Request) -> DatabaseStore:

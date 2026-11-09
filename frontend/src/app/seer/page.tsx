@@ -210,10 +210,17 @@ export default function SeerHubPage() {
     setIsRecovering(true);
     setValidationError(null);
     try {
-      await recoverAnalysisJob(activeJob.job_id);
-      clearRememberedAnalysisJob();
-      setActiveJob(null);
-      setValidationError("The stale analysis was safely recovered. Its late worker cannot save or replace a report; you can start a new analysis.");
+      const requeuedJob = await recoverAnalysisJob(activeJob.job_id);
+      setActiveJob(requeuedJob);
+      setProgress(requeuedJob.progress);
+      setStatusText(requeuedJob.message);
+      setIsAnalyzing(true);
+      const report = await resumeAnalysis(requeuedJob.job_id, (nextProgress, message) => {
+        setProgress(nextProgress);
+        setStatusText(message);
+      });
+      startNewRepositorySession(report);
+      router.push("/seer/results");
     } catch (error) {
       setValidationError(error instanceof Error ? error.message : "Unable to recover this analysis.");
       try {
@@ -221,6 +228,7 @@ export default function SeerHubPage() {
       } catch {
         // Keep the current job details visible when status lookup is temporarily unavailable.
       }
+      setIsAnalyzing(false);
     } finally {
       setIsRecovering(false);
     }

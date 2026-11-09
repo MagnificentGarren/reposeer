@@ -153,98 +153,49 @@ function buildPythonRequiredMessage(source: "GitHub" | "ZIP") {
   return "Analysis requires at least one Python file in the uploaded archive. Please upload a ZIP that contains Python source files, not just documentation or non-Python assets.";
 }
 
-async function getTerminalAnalysisResult(jobId: string, source?: "GitHub" | "ZIP"): Promise<unknown | null> {
-  const job = await getAnalysisJob(jobId);
-  if (job.status === "completed") {
-    if (!job.result || typeof job.result !== "object" || Array.isArray(job.result)) {
-      throw new Error("The analysis completed, but its saved result could not be loaded.");
-    }
-    clearRememberedAnalysisJob();
-    return { ...job.result, id: jobId };
-  }
-  if (job.status === "failed") {
-    clearRememberedAnalysisJob();
-    const message = job.message || "Inspection job encountered an error on the server.";
-    throw new Error(
-      message.toLowerCase().includes("requires at least one python file")
-        ? buildPythonRequiredMessage(source || "ZIP")
-        : message,
-    );
-  }
-  return null;
-}
-
 async function watchAnalysisJob(
   jobId: string,
   onProgress?: (progress: number, message: string) => void,
   source?: "GitHub" | "ZIP",
 ): Promise<unknown> {
-  let streamResponse: Response;
-  try {
-    streamResponse = await fetch(`${API_BASE_URL}/api/inspect/stream/${encodeURIComponent(jobId)}`, {
-      headers: await getAuthorizationHeaders(),
-    });
-  } catch (error) {
-    const result = await getTerminalAnalysisResult(jobId, source);
-    if (result !== null) return result;
-    throw error;
-  }
-  if (!streamResponse.ok) {
-    const errorData = await streamResponse.json().catch(() => ({}));
-    throw new Error(typeof errorData.detail === "string" ? errorData.detail : "Unable to read inspection progress.");
-  }
-  if (!streamResponse.body) {
-    throw new Error("The inspection progress stream was unavailable.");
-  }
-
-  const reader = streamResponse.body.getReader();
-  const decoder = new TextDecoder();
-  let pending = "";
-
+  let reconnectDelay = 1000;
+  let lastProgress = 0;
   while (true) {
-    let value: Uint8Array | undefined;
-    let done: boolean;
     try {
-      ({ value, done } = await reader.read());
-    } catch (error) {
-      const result = await getTerminalAnalysisResult(jobId, source);
-      if (result !== null) return result;
-      throw error;
-    }
-    pending += decoder.decode(value, { stream: !done });
-    const frames = pending.split(/\r?\n\r?\n/);
-    pending = frames.pop() || "";
-
-    for (const frame of frames) {
-      const eventData = frame
-        .split(/\r?\n/)
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim())
-        .join("\n");
-      if (!eventData) continue;
-
-      let payload: {
-        progress?: number;
-        message?: string;
-        status?: string;
-        is_stale?: boolean;
-        result?: unknown;
-      };
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+      let response: Response;
       try {
-        payload = JSON.parse(eventData);
-      } catch {
-        throw new Error("Failed to parse event stream payload.");
+        response = await fetch(`${API_BASE_URL}/api/inspect/jobs/${encodeURIComponent(jobId)}`, {
+          headers: await getAuthorizationHeaders(),
+          signal: controller.signal,
+        });
+      } finally {
+        window.clearTimeout(timeoutId);
       }
 
-      if (onProgress && typeof payload.progress === "number") {
-        onProgress?.(payload.progress, payload.message || "Analyzing repository...");
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status !== 408 && response.status !== 429 && response.status < 500) {
+          throw new Error(apiErrorMessage(payload, "Unable to reconnect to this analysis."));
+        }
+        onProgress?.(lastProgress, "The status service is unavailable. Reconnecting...");
+        await new Promise((resolve) => window.setTimeout(resolve, reconnectDelay));
+        reconnectDelay = Math.min(reconnectDelay * 2, 10000);
+        continue;
+      }
+
+      reconnectDelay = 1000;
+      if (typeof payload.progress === "number") {
+        lastProgress = payload.progress;
+        onProgress?.(lastProgress, payload.message || "Analyzing repository...");
       }
       if (payload.is_stale) {
         throw new Error("This analysis has stopped reporting progress. Return to Seer Hub to resume or recover it.");
       }
       if (payload.status === "completed") {
         clearRememberedAnalysisJob();
-        const result = payload.result;
+        const result = payload.result as unknown;
         return result && typeof result === "object"
           ? { ...result, id: jobId }
           : { id: jobId, result };
@@ -258,14 +209,16 @@ async function watchAnalysisJob(
             : message,
         );
       }
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    } catch (error) {
+      if (error instanceof Error && !["AbortError", "TypeError"].includes(error.name)) {
+        throw error;
+      }
+      onProgress?.(lastProgress, "Connection interrupted. Reconnecting to your saved analysis...");
+      await new Promise((resolve) => window.setTimeout(resolve, reconnectDelay));
+      reconnectDelay = Math.min(reconnectDelay * 2, 10000);
     }
-
-    if (done) break;
   }
-
-  const result = await getTerminalAnalysisResult(jobId, source);
-  if (result !== null) return result;
-  throw new Error("Connection to the inspection telemetry stream was lost.");
 }
 
 export async function resumeAnalysis(
