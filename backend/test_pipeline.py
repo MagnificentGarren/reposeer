@@ -1,57 +1,24 @@
-import json
-from app.services.ai_engine import build_inspection_workflow, WorkflowState
+from app.services.ast_parser import PythonASTParser
 from app.services.graph_mapper import DependencyGraphMapper
 
 
-def run_pipeline_test():
-    print("--- 1. Testing Dependency Graph Mapper ---")
-    mapper = DependencyGraphMapper()
-    
-    # Updated mock payload using structured import keys matching AST parser output
-    mock_parsed_files = [
-        {
-            "file_path": "app/api/inspect.py",
-            "classes": ["InspectAPI"],
-            "functions": ["run_inspect"],
-            "imports": [
-                {
-                    "module": "app.services.ingestion",
-                    "name": "IngestionService",
-                    "statement": "from app.services.ingestion import IngestionService"
-                }
-            ]
-        },
-        {
-            "file_path": "app/services/ingestion.py",
-            "classes": ["IngestionService"],
-            "functions": ["ingest_repo"],
-            "imports": []
-        }
+def test_pipeline_builds_dependency_graph_from_parsed_python_files():
+    parser = PythonASTParser()
+    parsed_files = [
+        parser.parse_code(
+            "app/api/inspect.py",
+            "from app.services.ingestion import IngestionService\n"
+            "def run_inspect():\n"
+            "    return IngestionService()\n",
+        ),
+        parser.parse_code(
+            "app/services/ingestion.py",
+            "class IngestionService:\n"
+            "    pass\n",
+        ),
     ]
-    
-    graph_results = mapper.build_graph(mock_parsed_files)
-    print(f"Total Nodes: {graph_results['total_nodes']}")
-    print(f"Total Edges: {graph_results['total_edges']}")
-    
-    assert graph_results['total_edges'] > 0, "Graph resolution failed: Total edges is 0!"
-    print("✅ Dependency Graph Resolution Passed!\n")
 
-    print("--- 2. Testing AI Engine Structured Output (Instructor MD_JSON) ---")
-    workflow = build_inspection_workflow()
-    
-    input_state: WorkflowState = {
-        "ast_summary": graph_results,
-        "repo_structure": "app/api/inspect.py\napp/services/ingestion.py",
-        "report": None
-    }
-    
-    output = workflow.invoke(input_state)
-    print("Generated Inspection Report:")
-    print(json.dumps(output["report"], indent=2))
-    
-    assert output["report"] is not None, "AI Report generation returned None!"
-    print("✅ AI Engine Schema Generation Passed!\n")
+    graph_results = DependencyGraphMapper().build_graph(parsed_files)
 
-
-if __name__ == "__main__":
-    run_pipeline_test()
+    assert graph_results["total_nodes"] == 2
+    assert graph_results["total_edges"] == 1

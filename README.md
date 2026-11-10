@@ -663,6 +663,8 @@ From the `backend` directory:
 pytest
 ```
 
+The backend tests cover Supabase bearer-token validation, quota rejection, analysis/report ownership, ZIP validation, job progress and failure states, chat/interview flows, and checks that provider failures do not expose credentials or source code in logs. AI-provider calls are mocked; staging behavior still needs to be verified against the deployed services.
+
 ### Frontend Linting
 
 ```bash

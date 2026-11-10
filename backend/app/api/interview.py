@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -8,6 +9,7 @@ from app.services.auth import get_current_user
 from app.services.database import DatabaseStore, get_database_store, hash_client_ip
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 def get_gemini_client():
     api_key = os.getenv("GEMINI_API_KEY")
@@ -130,9 +132,9 @@ async def generate_interview_question(
             "question": clean_generated_question(response.text or "How would you refactor the tightly coupled dependencies in this repository?"),
             "target_flaw": "Repository structure and module boundaries",
         }
-    except Exception as e:
-        print(f"[Interview Gen Error]: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate question: {str(e)}")
+    except Exception as exc:
+        logger.error("Interview question generation failed.")
+        raise HTTPException(status_code=500, detail="Failed to generate an interview question.") from None
     finally:
         await gemini_client.aio.aclose()
 
@@ -183,8 +185,8 @@ async def evaluate_candidate_response(
             "evaluation": evaluation,
             "scores": scores,
         }
-    except Exception as e:
-        print(f"[Evaluation Error]: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to evaluate answer: {str(e)}")
+    except Exception as exc:
+        logger.error("Interview response evaluation failed.")
+        raise HTTPException(status_code=500, detail="Failed to evaluate the interview response.") from None
     finally:
         await gemini_client.aio.aclose()

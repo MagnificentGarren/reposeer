@@ -633,4 +633,4 @@ async def run_database_maintenance(store: DatabaseStore) -> None:
         try:
             await store.prune_expired()
         except (asyncpg.PostgresError, OSError):
-            logger.exception("Database cleanup of expired reports and usage records failed")
+            logger.error("Database cleanup of expired reports and usage records failed.")

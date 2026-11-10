@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.api.inspect import _save_analysis_result
+import app.api.inspect as inspect_api
 import app.services.ingestion as ingestion
 from app.services.auth import get_current_user
 from app.services.database import ANALYSIS_STALE_SECONDS
@@ -74,6 +75,30 @@ def test_upload_zip_endpoint_rejects_archive_without_python_file():
 
     assert response.status_code == 400, response.text
     assert "no Python files" in response.json()["detail"]
+
+
+def test_upload_zip_endpoint_rejects_invalid_archive():
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/inspect/upload",
+            files={"file": ("project.zip", b"not a zip archive", "application/zip")},
+        )
+
+    assert response.status_code == 400
+    assert "Invalid ZIP archive" in response.json()["detail"]
+
+
+def test_upload_zip_endpoint_rejects_archive_over_compressed_size_limit(monkeypatch):
+    monkeypatch.setattr(inspect_api, "MAX_ARCHIVE_SIZE_BYTES", 4)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/inspect/upload",
+            files={"file": ("project.zip", b"12345", "application/zip")},
+        )
+
+    assert response.status_code == 413
+    assert "too large" in response.json()["detail"].lower()
 
 
 def test_upload_zip_endpoint_rejects_path_traversal(fake_database_store):

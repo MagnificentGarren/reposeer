@@ -1,3 +1,4 @@
+import logging
 import os
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -8,6 +9,7 @@ from app.services.auth import get_current_user
 from app.services.database import DatabaseStore, get_database_store, hash_client_ip
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def get_gemini_client() -> genai.Client:
@@ -104,8 +106,8 @@ async def seer_casual_chat(
             for chunk in response:
                 if chunk.text:
                     yield chunk.text
-        except Exception as e:
-            print(f"[Reposeer Chat Streaming Error]: {str(e)}")
-            yield "\n\nAn error occurred while streaming response telemetry."
+        except Exception:
+            logger.error("Chat response streaming failed.")
+            yield "\n\nAn error occurred while generating the response. Please try again."
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

@@ -35,7 +35,7 @@ async def _maintain_temp_files(store: DatabaseStore) -> None:
                 active_job_ids,
             )
         except (asyncpg.PostgresError, OSError):
-            logger.exception("Cleanup of abandoned analysis temporary directories failed")
+            logger.error("Cleanup of abandoned analysis temporary directories failed.")
 
 
 async def _heartbeat(store: DatabaseStore, job_id: str, worker_id: str) -> None:
@@ -46,7 +46,7 @@ async def _heartbeat(store: DatabaseStore, job_id: str, worker_id: str) -> None:
                 logger.warning("Worker lease for analysis job %s was lost", job_id)
                 return
         except (asyncpg.PostgresError, OSError):
-            logger.exception("Could not renew worker lease for analysis job %s", job_id)
+            logger.error("Could not renew worker lease for analysis job %s.", job_id)
 
 
 async def run_worker_loop(store: DatabaseStore) -> None:
@@ -60,7 +60,7 @@ async def run_worker_loop(store: DatabaseStore) -> None:
             active_job_ids,
         )
     except (asyncpg.PostgresError, OSError):
-        logger.exception("Initial cleanup of abandoned analysis directories failed")
+        logger.error("Initial cleanup of abandoned analysis directories failed.")
     logger.info("Analysis worker %s started", worker_id)
 
     try:
@@ -68,7 +68,7 @@ async def run_worker_loop(store: DatabaseStore) -> None:
             try:
                 job = await store.claim_next_analysis(worker_id)
             except (asyncpg.PostgresError, OSError):
-                logger.exception("Analysis worker could not claim a job")
+                logger.error("Analysis worker could not claim a job.")
                 await asyncio.sleep(QUEUE_POLL_SECONDS * 5)
                 continue
             if job is None:
@@ -82,7 +82,7 @@ async def run_worker_loop(store: DatabaseStore) -> None:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("Analysis worker failed while processing job %s", job_id)
+                logger.error("Analysis worker failed while processing job %s.", job_id)
                 try:
                     await store.update_job(
                         job_id,
@@ -92,7 +92,7 @@ async def run_worker_loop(store: DatabaseStore) -> None:
                         worker_id=worker_id,
                     )
                 except (asyncpg.PostgresError, OSError):
-                    logger.exception("Could not save failure state for analysis job %s", job_id)
+                    logger.error("Could not save failure state for analysis job %s.", job_id)
             finally:
                 heartbeat_task.cancel()
                 try:
@@ -134,7 +134,7 @@ def main() -> None:
     try:
         asyncio.run(run_worker())
     except (asyncpg.PostgresError, OSError):
-        logger.exception("Analysis worker stopped because it could not reach PostgreSQL.")
+        logger.error("Analysis worker stopped because it could not reach PostgreSQL.")
         raise
 
 

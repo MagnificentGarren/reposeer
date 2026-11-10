@@ -88,13 +88,13 @@ async def run_analysis_task(job_id: str, repo_url: str, store: DatabaseStore, wo
         ingestion.cleanup_temp_dir(temp_dir)
         temp_dir = None
         await _save_analysis_result(job_id, report, store, worker_id)
-    except Exception as exc:
-        logger.exception("Analysis job %s failed", job_id)
+    except Exception:
+        logger.error("Analysis job %s failed.", job_id)
         await store.update_job(
             job_id,
             status="failed",
             progress=0,
-            message=f"Analysis failed: {str(exc)}",
+            message="Analysis failed while processing the repository. Please try again.",
             worker_id=worker_id,
         )
     finally:
@@ -139,13 +139,13 @@ async def run_zip_analysis_task(job_id: str, archive_bytes: bytes, store: Databa
         ingestion.cleanup_temp_dir(extracted_dir)
         extracted_dir = None
         await _save_analysis_result(job_id, report, store, worker_id)
-    except Exception as exc:
-        logger.exception("Analysis job %s failed", job_id)
+    except Exception:
+        logger.error("Analysis job %s failed.", job_id)
         await store.update_job(
             job_id,
             status="failed",
             progress=0,
-            message=f"Analysis failed: {str(exc)}",
+            message="Analysis failed while processing the uploaded archive. Please try again.",
             worker_id=worker_id,
         )
     finally:

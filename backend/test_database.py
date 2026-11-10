@@ -21,6 +21,125 @@ def test_quota_error_has_actionable_http_response():
     assert error.detail["message"] == "Ai actions limit reached (10 per day). Please try again later."
 
 
+@pytest.mark.parametrize(
+    ("daily", "monthly", "expected_window"),
+    [(database.AI_ACTIONS_PER_DAY, 0, "day"), (0, database.AI_ACTIONS_PER_MONTH, "month")],
+)
+def test_ai_action_quota_blocks_database_write(daily, monthly, expected_window):
+    class FakeConnection:
+        def __init__(self):
+            self.executed_statements = []
+
+        class Transaction:
+            async def __aenter__(self):
+                return None
+
+            async def __aexit__(self, *_args):
+                return False
+
+        def transaction(self):
+            return self.Transaction()
+
+        async def execute(self, query, *_args):
+            self.executed_statements.append(query)
+
+        async def fetchrow(self, _query, _subject):
+            return {"daily": daily, "monthly": monthly}
+
+    class FakeAcquire:
+        def __init__(self, connection):
+            self.connection = connection
+
+        async def __aenter__(self):
+            return self.connection
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class FakePool:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def acquire(self):
+            return FakeAcquire(self.connection)
+
+    connection = FakeConnection()
+    store = database.DatabaseStore(FakePool(connection))
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            store.consume_ai_action(
+                "00000000-0000-0000-0000-000000000001",
+                "hashed-test-ip",
+                "chat",
+            )
+        )
+
+    assert error.value.status_code == 429
+    assert error.value.detail["window"] == expected_window
+    assert not any("INSERT INTO usage_records" in query for query in connection.executed_statements)
+
+
+def test_analysis_quota_blocks_job_and_usage_inserts():
+    class FakeConnection:
+        def __init__(self):
+            self.executed_statements = []
+
+        class Transaction:
+            async def __aenter__(self):
+                return None
+
+            async def __aexit__(self, *_args):
+                return False
+
+        def transaction(self):
+            return self.Transaction()
+
+        async def execute(self, query, *_args):
+            self.executed_statements.append(query)
+
+        async def fetchval(self, _query, *_args):
+            return 0
+
+        async def fetchrow(self, _query, _subject):
+            return {"daily": database.ANALYSES_PER_DAY, "monthly": 0}
+
+    class FakeAcquire:
+        def __init__(self, connection):
+            self.connection = connection
+
+        async def __aenter__(self):
+            return self.connection
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class FakePool:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def acquire(self):
+            return FakeAcquire(self.connection)
+
+    connection = FakeConnection()
+    store = database.DatabaseStore(FakePool(connection))
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            store.create_analysis(
+                "00000000-0000-0000-0000-000000000001",
+                "hashed-test-ip",
+                input_type="github",
+                input_payload={"repo_url": "https://github.com/example/repo"},
+            )
+        )
+
+    assert error.value.status_code == 429
+    assert error.value.detail["quota"] == "analyses"
+    assert not any("INSERT INTO analysis_jobs" in query for query in connection.executed_statements)
+    assert not any("INSERT INTO usage_records" in query for query in connection.executed_statements)
+
+
 def test_active_analysis_conflict_is_distinct_from_quota_exhaustion():
     error = _active_analysis_error()
 
