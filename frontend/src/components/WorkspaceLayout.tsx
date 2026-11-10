@@ -6,6 +6,7 @@ import {
   Bookmark,
   ChartNoAxesColumnIncreasing,
   CircleUserRound,
+  CreditCard,
   Compass,
   LogOut,
   Sparkles,
@@ -16,7 +17,8 @@ const navigation = [
   { href: "/seer", label: "Overview", icon: Compass },
   { href: "/seer/repositories", label: "Saved repositories", icon: Bookmark },
   { href: "/seer/reports", label: "Reports", icon: ChartNoAxesColumnIncreasing },
-  { href: "/seer/profile", label: "Profile & plan", icon: CircleUserRound },
+  { href: "/seer/profile", label: "Profile & appearance", icon: CircleUserRound },
+  { href: "/seer/plans", label: "Manage subscription", icon: CreditCard },
 ];
 
 export function WorkspaceLayout({

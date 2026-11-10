@@ -29,6 +29,7 @@ function applyTheme(theme: ThemePreference) {
   root.dataset.theme = theme;
   root.dataset.colorScheme = isDark ? "dark" : "light";
   root.classList.toggle("dark", isDark);
+  root.style.colorScheme = isDark ? "dark" : "light";
 }
 
 export function ThemeProvider({ children }: PropsWithChildren) {
@@ -64,6 +65,7 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   const effectiveTheme = user ? theme : "default";
 
   useEffect(() => {
+    if (isAuthLoading || (user && loadedUserId !== user.id)) return;
     applyTheme(effectiveTheme);
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const handleSystemThemeChange = () => {
@@ -71,11 +73,18 @@ export function ThemeProvider({ children }: PropsWithChildren) {
     };
     media.addEventListener("change", handleSystemThemeChange);
     return () => media.removeEventListener("change", handleSystemThemeChange);
-  }, [effectiveTheme]);
+  }, [effectiveTheme, isAuthLoading, loadedUserId, user]);
 
   const setTheme = useCallback(async (nextTheme: ThemePreference) => {
     setThemeError(null);
     setThemeState(nextTheme);
+    applyTheme(nextTheme);
+    try {
+      window.localStorage.setItem("reposeer-theme", nextTheme);
+    } catch (error) {
+      setThemeError("Your theme will be saved to your account, but this browser cannot store it for instant page loads.");
+      console.error("Unable to cache the theme preference in this browser.", error);
+    }
     try {
       await updateThemePreference(nextTheme);
     } catch (error) {
