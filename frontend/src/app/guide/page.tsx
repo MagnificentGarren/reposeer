@@ -17,29 +17,29 @@ import {
   Sparkles,
   Maximize2,
   X,
-  Upload,
 } from "lucide-react";
+import HomeAction from "@/components/HomeAction";
 
 const steps = [
   {
     number: "01",
     title: "Connect a repository",
     description:
-      "Start with a public GitHub repository or bring a local ZIP archive. Reposeer Seer searches the repository for Python files and uses them as the foundation for every later view.",
-    note: "Choose the input that fits your workflow.",
+      "Sign in, then connect a public GitHub repository. Reposeer searches it for Python files and uses them as the foundation for every later view.",
+    note: "Your dashboard shows your plan usage before you start an analysis.",
     image: "/guide/01-seer-hub-github.png",
     alt: "Reposeer Seer Hub with the GitHub repository input selected",
     icon: GitBranch,
   },
   {
     number: "02",
-    title: "Upload locally when needed",
+    title: "Review repository requirements",
     description:
-      "For private or local work, switch to Local ZIP and select a project archive. This is useful when the repository is not available as a public endpoint.",
-    note: "Keep the archive under the size shown in the uploader.",
-    image: "/guide/02-seer-hub-upload.png",
-    alt: "Reposeer Seer Hub with the Local ZIP upload option selected",
-    icon: Upload,
+      "Repository analysis currently supports public GitHub repository links and requires at least one Python source file. Private repositories and local archive uploads are not supported.",
+    note: "Check access and language requirements before submitting.",
+    image: "/guide/01-seer-hub-github.png",
+    alt: "Reposeer dashboard with the GitHub repository input selected",
+    icon: GitBranch,
   },
   {
     number: "03",
@@ -138,7 +138,7 @@ export default function GuidePage() {
             <Link href="/about" className="rounded-full px-4 py-2 text-xs font-semibold text-slate-400 transition-all hover:bg-emerald-950/60 hover:text-slate-100">About</Link>
             <Link href="/guide" className="rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-xs font-semibold text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)] transition-all">Guide</Link>
           </nav>
-          <Link href="/seer" className="whitespace-nowrap rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-bold text-slate-950 shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-all hover:bg-emerald-400">Launch Seer Hub</Link>
+          <HomeAction className="whitespace-nowrap rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-bold text-slate-950 shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-all hover:bg-emerald-400">Launch Seer Hub</HomeAction>
         </div>
       </header>
 
@@ -148,7 +148,7 @@ export default function GuidePage() {
             <div>
               <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-950/60 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400"><FileArchive className="h-3.5 w-3.5" /> User guide</div>
               <h1 className="max-w-3xl text-5xl font-bold leading-[1.05] tracking-tight text-slate-100 sm:text-7xl">A clearer way into an unfamiliar codebase.</h1>
-              <p className="mt-7 max-w-xl text-lg leading-relaxed text-slate-300">Follow a repository from first upload to architectural insight. This guide shows what each Reposeer screen is for and how to get useful signal from it.</p>
+              <p className="mt-7 max-w-xl text-lg leading-relaxed text-slate-300">Follow a public GitHub repository from sign-in to architectural insight. This guide shows what each Reposeer screen is for and how to get useful signal from it.</p>
               <Link href="#step-01" className="mt-9 inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 shadow-[0_0_20px_rgba(16,185,129,0.25)] transition hover:bg-emerald-400">Start the walkthrough <ArrowDown className="h-4 w-4" /></Link>
             </div>
             <div className="relative aspect-[4/3] overflow-hidden rounded-3xl border border-emerald-500/30 bg-emerald-950/20 p-3 shadow-[0_0_50px_rgba(16,185,129,0.14)]">
@@ -189,7 +189,7 @@ export default function GuidePage() {
 
         <section className="flex flex-col items-start justify-between gap-6 border-y border-emerald-950/70 py-20 sm:flex-row sm:items-center">
           <div><p className="font-mono text-xs uppercase tracking-[0.2em] text-emerald-400">Walkthrough complete</p><h2 className="mt-3 text-3xl font-bold text-slate-100">Bring your own repository into focus.</h2></div>
-          <Link href="/seer" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400">Launch Seer Hub <ArrowRight className="h-4 w-4" /></Link>
+          <HomeAction className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400">Launch Seer Hub <ArrowRight className="h-4 w-4" /></HomeAction>
         </section>
       </main>
 

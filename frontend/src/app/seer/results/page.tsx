@@ -14,8 +14,13 @@ import {
   Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { clearReposeerSession, readReposeerSession, startNewRepositorySession } from "@/lib/session";
-import { getSavedReport } from "@/lib/api";
+import {
+  clearReposeerSession,
+  getAuthRequestEpoch,
+  readReposeerSession,
+  startNewRepositorySession,
+} from "@/lib/session";
+import { getSavedReport, listSavedRepositories, saveRepository } from "@/lib/api";
 
 // Comprehensive property extractor for node/file labels
 const extractString = (val: any, fallback = ""): string => {
@@ -46,18 +51,23 @@ export default function SeerResultsPage() {
   const [activeTab, setActiveTab] = useState<"graph" | "ast">("graph");
   const [exitTarget, setExitTarget] = useState<"/" | "/seer" | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [isRepositorySaved, setIsRepositorySaved] = useState(false);
+  const [isSavingRepository, setIsSavingRepository] = useState(false);
+  const [repositorySaveError, setRepositorySaveError] = useState<string | null>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   useEffect(() => {
     let cancelled = false;
+    const authEpoch = getAuthRequestEpoch();
     const loadReport = async () => {
       try {
         const reportId = new URLSearchParams(window.location.search).get("report_id");
         let parsed = readReposeerSession()?.report;
         if (reportId) {
           const savedReport = await getSavedReport(reportId);
+          if (cancelled || getAuthRequestEpoch() !== authEpoch) return;
           if (!savedReport.result || typeof savedReport.result !== "object") {
             throw new Error("The saved report has an invalid format.");
           }
@@ -150,6 +160,36 @@ export default function SeerResultsPage() {
       cancelled = true;
     };
   }, [setNodes, setEdges]);
+
+  useEffect(() => {
+    const repositoryUrl = report?.repository_url;
+    if (typeof repositoryUrl !== "string") return;
+    let active = true;
+    listSavedRepositories()
+      .then((repositories) => {
+        if (active) setIsRepositorySaved(repositories.some((repository) => repository.repository_url === repositoryUrl));
+      })
+      .catch((error: unknown) => {
+        if (active) setRepositorySaveError(error instanceof Error ? error.message : "Unable to check saved repositories.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [report]);
+
+  const handleSaveRepository = async () => {
+    if (typeof report?.repository_url !== "string") return;
+    setIsSavingRepository(true);
+    setRepositorySaveError(null);
+    try {
+      await saveRepository(report.repository_url);
+      setIsRepositorySaved(true);
+    } catch (error) {
+      setRepositorySaveError(error instanceof Error ? error.message : "Unable to save this repository.");
+    } finally {
+      setIsSavingRepository(false);
+    }
+  };
 
   const astSummary = useMemo(() => {
     if (!report) return [];
@@ -262,6 +302,20 @@ export default function SeerResultsPage() {
               <p className="px-3 text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-2">
                 Session Actions
               </p>
+
+              {typeof report.repository_url === "string" && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveRepository()}
+                    disabled={isRepositorySaved || isSavingRepository}
+                    className="w-full rounded-xl border border-emerald-500/30 px-4 py-3 text-left text-xs font-semibold text-emerald-300 hover:bg-emerald-950/40 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isRepositorySaved ? "✓ Repository saved" : isSavingRepository ? "Saving repository…" : "☆ Save repository"}
+                  </button>
+                  {repositorySaveError && <p role="alert" className="px-3 text-xs text-rose-300">{repositorySaveError}</p>}
+                </>
+              )}
 
               <button
                 onClick={() => setExitTarget("/seer")}

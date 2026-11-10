@@ -1,15 +1,11 @@
 import asyncio
-from io import BytesIO
 from datetime import datetime, timedelta, timezone
-import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.api.inspect import _save_analysis_result
-import app.api.inspect as inspect_api
-import app.services.ingestion as ingestion
 from app.services.auth import get_current_user
 from app.services.database import ANALYSIS_STALE_SECONDS
 
@@ -21,26 +17,10 @@ def authenticated_test_user(fake_database_store):
     app.dependency_overrides.pop(get_current_user, None)
 
 
-def test_upload_zip_endpoint_accepts_archive(fake_database_store):
-    archive_buffer = BytesIO()
-    with zipfile.ZipFile(archive_buffer, "w") as archive:
-        archive.writestr("sample_app/__init__.py", "VALUE = 1\n")
-        archive.writestr("sample_app/main.py", "def hello():\n    return 'hi'\n")
-
-    archive_buffer.seek(0)
-
+def test_zip_ingestion_endpoint_is_removed():
     with TestClient(app) as client:
-        response = client.post(
-            "/api/inspect/upload",
-            files={"file": ("project.zip", archive_buffer.getvalue(), "application/zip")},
-        )
-
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert "job_id" in data
-    assert data["status"] == "queued"
-    assert fake_database_store.jobs[data["job_id"]]["input_type"] == "zip"
-    assert fake_database_store.jobs[data["job_id"]]["input_archive"]
+        response = client.post("/api/inspect/upload")
+    assert response.status_code == 404
 
 
 def test_github_endpoint_persists_repository_as_queued_work(fake_database_store):
@@ -58,83 +38,37 @@ def test_github_endpoint_persists_repository_as_queued_work(fake_database_store)
     job = fake_database_store.jobs[data["job_id"]]
     assert job["input_type"] == "github"
     assert job["input_payload"] == {"repo_url": repo_url}
+    assert job["repository_url"] == repo_url
 
 
-def test_upload_zip_endpoint_rejects_archive_without_python_file():
-    archive_buffer = BytesIO()
-    with zipfile.ZipFile(archive_buffer, "w") as archive:
-        archive.writestr("README.md", "Documentation only\n")
-
-    archive_buffer.seek(0)
-
+def test_usage_endpoint_exposes_enforced_plan_limits():
     with TestClient(app) as client:
-        response = client.post(
-            "/api/inspect/upload",
-            files={"file": ("project.zip", archive_buffer.getvalue(), "application/zip")},
-        )
+        response = client.get("/api/inspect/usage")
+    assert response.status_code == 200
+    usage = response.json()
+    assert usage["plan"] == "free"
+    assert usage["analyses"]["daily"]["limit"] == 3
+    assert usage["analyses"]["monthly"]["limit"] == 20
+    assert usage["ai_actions"]["daily"]["limit"] == 10
+    assert usage["ai_actions"]["monthly"]["limit"] == 100
 
-    assert response.status_code == 400, response.text
-    assert "no Python files" in response.json()["detail"]
 
-
-def test_upload_zip_endpoint_rejects_invalid_archive():
+def test_saved_repository_identifies_github_project_and_theme_preference(fake_database_store):
     with TestClient(app) as client:
-        response = client.post(
-            "/api/inspect/upload",
-            files={"file": ("project.zip", b"not a zip archive", "application/zip")},
+        saved = client.post(
+            "/api/inspect/repositories",
+            json={"repository_url": "https://github.com/example/project/"},
         )
+        repositories = client.get("/api/inspect/repositories")
+        theme = client.put("/api/inspect/preferences", json={"theme": "light"})
+        invalid_theme = client.put("/api/inspect/preferences", json={"theme": "neon"})
 
-    assert response.status_code == 400
-    assert "Invalid ZIP archive" in response.json()["detail"]
-
-
-def test_upload_zip_endpoint_rejects_archive_over_compressed_size_limit(monkeypatch):
-    monkeypatch.setattr(inspect_api, "MAX_ARCHIVE_SIZE_BYTES", 4)
-
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/inspect/upload",
-            files={"file": ("project.zip", b"12345", "application/zip")},
-        )
-
-    assert response.status_code == 413
-    assert "too large" in response.json()["detail"].lower()
-
-
-def test_upload_zip_endpoint_rejects_path_traversal(fake_database_store):
-    archive_buffer = BytesIO()
-    with zipfile.ZipFile(archive_buffer, "w") as archive:
-        archive.writestr("../outside.py", "VALUE = 1\n")
-
-    archive_buffer.seek(0)
-
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/inspect/upload",
-            files={"file": ("project.zip", archive_buffer.getvalue(), "application/zip")},
-        )
-
-    assert response.status_code == 400, response.text
-    assert "unsafe path" in response.json()["detail"]
-    assert fake_database_store.analysis_usage == []
-
-
-def test_upload_zip_endpoint_rejects_excessive_extracted_size(monkeypatch):
-    monkeypatch.setattr(ingestion, "MAX_EXTRACTED_SIZE_BYTES", 4)
-    archive_buffer = BytesIO()
-    with zipfile.ZipFile(archive_buffer, "w") as archive:
-        archive.writestr("sample_app/main.py", "12345")
-
-    archive_buffer.seek(0)
-
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/inspect/upload",
-            files={"file": ("project.zip", archive_buffer.getvalue(), "application/zip")},
-        )
-
-    assert response.status_code == 400, response.text
-    assert "extraction limit" in response.json()["detail"]
+    assert saved.status_code == 200
+    assert saved.json()["repository"]["repository_name"] == "example/project"
+    assert repositories.json()["repositories"][0]["repository_url"] == "https://github.com/example/project"
+    assert theme.status_code == 200
+    assert theme.json()["theme"] == "light"
+    assert invalid_theme.status_code == 400
 
 
 def test_active_analysis_is_resumable_and_duplicate_start_is_conflict(fake_database_store):

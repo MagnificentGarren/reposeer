@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { deleteSavedReport, listSavedReports, type SavedReport } from "@/lib/api";
 import { clearReposeerSession, readReposeerSession } from "@/lib/session";
+import { WorkspaceLayout } from "@/components/WorkspaceLayout";
 
 export default function SavedReportsPage() {
   const [reports, setReports] = useState<SavedReport[]>([]);
@@ -63,7 +64,8 @@ export default function SavedReportsPage() {
   };
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#030908] px-5 py-10 text-slate-100 sm:px-8 sm:py-14">
+    <WorkspaceLayout title="Reports">
+    <main className="relative overflow-hidden px-1 py-2 text-slate-100 sm:px-2">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(16,185,129,0.16),transparent_48%)]"
@@ -174,7 +176,12 @@ export default function SavedReportsPage() {
                       <FileCode2 size={20} aria-hidden="true" />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="truncate font-semibold text-slate-100">Repository analysis</h3>
+                      <h3 className="truncate font-semibold text-slate-100">{report.repository_name}</h3>
+                      {report.repository_url && (
+                        <a href={report.repository_url} target="_blank" rel="noreferrer" className="mt-1 inline-block max-w-full truncate text-xs text-emerald-300 hover:text-emerald-200">
+                          {report.repository_url}
+                        </a>
+                      )}
                       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-slate-400">
                         <span>{report.files_analyzed} Python files analyzed</span>
                         <span>Created {new Date(report.created_at).toLocaleString()}</span>
@@ -211,5 +218,6 @@ export default function SavedReportsPage() {
         </section>
       </section>
     </main>
+    </WorkspaceLayout>
   );
 }

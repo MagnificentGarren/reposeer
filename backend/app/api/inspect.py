@@ -9,13 +9,12 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 # Import services used by the structural inspection pipeline
 from app.services.ingestion import (
-    MAX_ARCHIVE_SIZE_BYTES,
     IngestionService,
 )
 from app.services.ast_parser import PythonASTParser
@@ -34,6 +33,14 @@ class LocalInspectRequest(BaseModel):
 
 class GitHubInspectRequest(BaseModel):
     repo_url: str
+
+
+class SavedRepositoryRequest(BaseModel):
+    repository_url: str
+
+
+class ThemePreferenceRequest(BaseModel):
+    theme: str
 
 
 async def run_analysis_task(job_id: str, repo_url: str, store: DatabaseStore, worker_id: str):
@@ -85,6 +92,8 @@ async def run_analysis_task(job_id: str, repo_url: str, store: DatabaseStore, wo
         if not job_active:
             return
         report = await _run_analysis_on_directory(job_id, temp_dir, store, worker_id)
+        if report is not None:
+            report["repository_url"] = repo_url
         ingestion.cleanup_temp_dir(temp_dir)
         temp_dir = None
         await _save_analysis_result(job_id, report, store, worker_id)
@@ -257,10 +266,13 @@ async def inspect_github_repository(
 ):
     repo_url = (payload.repo_url or "").strip()
     parsed = urlparse(repo_url)
+    segments = [segment for segment in parsed.path.split("/") if segment]
     is_valid_github_url = (
-        parsed.scheme in {"http", "https"}
-        and parsed.netloc.lower().replace("www.", "") in {"github.com"}
-        and len([segment for segment in parsed.path.split("/") if segment]) >= 2
+        parsed.scheme == "https"
+        and parsed.netloc.lower() == "github.com"
+        and not parsed.query
+        and not parsed.fragment
+        and len(segments) == 2
     )
 
     if not is_valid_github_url:
@@ -269,66 +281,97 @@ async def inspect_github_repository(
             detail="Please provide a valid GitHub repository URL, for example: https://github.com/owner/repo. Analysis requires at least one Python file in the repository.",
         )
 
+    repository_name = segments[1].removesuffix(".git")
+    repo_url = f"https://github.com/{segments[0]}/{repository_name}"
     job_id = await store.create_analysis(
         user["id"],
         hash_client_ip(request.client.host if request.client else None),
         input_type="github",
         input_payload={"repo_url": repo_url},
+        repository_url=repo_url,
     )
 
     return {"job_id": job_id, "status": "queued"}
 
 
-@router.post("/upload")
-async def inspect_uploaded_repository(
-    request: Request,
-    file: UploadFile = File(...),
+@router.get("/usage")
+async def get_account_usage(
     user: dict[str, str] = Depends(get_current_user),
     store: DatabaseStore = Depends(get_database_store),
 ):
-    if not file.filename or not file.filename.lower().endswith(".zip"):
+    return await store.get_usage(user["id"])
+
+
+@router.get("/repositories")
+async def list_saved_repositories(
+    user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
+):
+    return {"repositories": await store.list_saved_repositories(user["id"])}
+
+
+@router.post("/repositories")
+async def save_repository(
+    payload: SavedRepositoryRequest,
+    user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
+):
+    parsed = urlparse(payload.repository_url.strip())
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc.lower() != "github.com"
+        or parsed.query
+        or parsed.fragment
+        or len(segments) != 2
+        or any(segment in {".", ".."} for segment in segments)
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Please upload a ZIP archive containing the repository. Analysis requires at least one Python file in the archive.",
+            detail="Only GitHub repository URLs in the format https://github.com/owner/repository can be saved.",
         )
-
-    archive_size = file.file.seek(0, 2)
-    file.file.seek(0)
-    if archive_size > MAX_ARCHIVE_SIZE_BYTES:
-        limit_mb = MAX_ARCHIVE_SIZE_BYTES // (1024 * 1024)
-        raise HTTPException(
-            status_code=413,
-            detail=f"The uploaded ZIP is too large. The limit is {limit_mb}MB.",
+    repository_name = segments[1].removesuffix(".git")
+    if not repository_name:
+        raise HTTPException(status_code=400, detail="A repository name is required.")
+    repository_url = f"https://github.com/{segments[0]}/{repository_name}"
+    repository_name = f"{segments[0]}/{repository_name}"
+    return {
+        "repository": await store.save_repository(
+            user["id"], repository_url, repository_name
         )
+    }
 
-    archive_bytes = await file.read()
-    try:
-        with zipfile.ZipFile(BytesIO(archive_bytes), "r") as archive:
-            IngestionService.validate_zip_archive(archive, Path(tempfile.gettempdir()))
-            has_python_file = any(
-                not entry.is_dir() and entry.filename.lower().endswith(".py")
-                for entry in archive.infolist()
-            )
-            if not has_python_file:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "The uploaded ZIP was rejected because it contains no Python files. "
-                        "Please upload a repository archive with at least one .py source file."
-                    ),
-                )
 
-            job_id = await store.create_analysis(
-                user["id"],
-                hash_client_ip(request.client.host if request.client else None),
-                input_type="zip",
-                input_archive=archive_bytes,
-            )
-    except zipfile.BadZipFile as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid ZIP archive: {str(exc)}") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"job_id": job_id, "status": "queued"}
+@router.delete("/repositories/{repository_id}")
+async def delete_saved_repository(
+    repository_id: uuid.UUID,
+    user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
+):
+    deleted = await store.delete_saved_repository(str(repository_id), user["id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Saved repository not found.")
+    return {"deleted": True}
+
+
+@router.get("/preferences")
+async def get_user_preferences(
+    user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
+):
+    return {"theme": await store.get_theme_preference(user["id"])}
+
+
+@router.put("/preferences")
+async def update_user_preferences(
+    payload: ThemePreferenceRequest,
+    user: dict[str, str] = Depends(get_current_user),
+    store: DatabaseStore = Depends(get_database_store),
+):
+    if payload.theme not in {"default", "light", "dark"}:
+        raise HTTPException(status_code=400, detail="Theme must be default, light, or dark.")
+    await store.set_theme_preference(user["id"], payload.theme)
+    return {"theme": payload.theme}
 
 
 @router.get("/stream/{job_id}")

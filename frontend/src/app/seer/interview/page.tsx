@@ -19,6 +19,7 @@ import {
   clearReposeerSession,
   readReposeerSession,
   writeReposeerSession,
+  getAuthRequestEpoch,
 } from "@/lib/session";
 import { API_BASE_URL } from "@/lib/config";
 import { getAuthorizationHeaders } from "@/lib/supabase";
@@ -83,6 +84,7 @@ export default function SeerInterviewPage() {
   const [showResetModal, setShowResetModal] = useState(false);
 
   const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const authEpochRef = useRef(getAuthRequestEpoch());
 
   useEffect(() => {
     if (!isResizing) return;
@@ -110,6 +112,7 @@ export default function SeerInterviewPage() {
   }, [isResizing]);
 
   const fetchQuestion = async (selectedDiff: Difficulty, currentReport: unknown) => {
+    const authEpoch = getAuthRequestEpoch();
     setIsGenerating(true);
     setGenerationError(null);
     setEvaluationResult(null);
@@ -129,12 +132,14 @@ export default function SeerInterviewPage() {
         throw new Error(apiErrorMessage(errorData, "Unable to generate an interview scenario. Please try again."));
       }
       const data: QuestionData = await res.json();
+      if (getAuthRequestEpoch() !== authEpoch) return;
       setQuestionData(data);
     } catch (err) {
+      if (getAuthRequestEpoch() !== authEpoch) return;
       console.error("Error fetching question:", err);
       setGenerationError(err instanceof Error ? err.message : "Unable to generate an interview scenario. Please try again.");
     } finally {
-      setIsGenerating(false);
+      if (getAuthRequestEpoch() === authEpoch) setIsGenerating(false);
     }
   };
 
@@ -163,7 +168,11 @@ export default function SeerInterviewPage() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !report) return;
+    if (
+      typeof window === "undefined" ||
+      getAuthRequestEpoch() !== authEpochRef.current ||
+      !report
+    ) return;
 
     const storedSession = readReposeerSession();
     if (storedSession?.report) {
@@ -195,6 +204,7 @@ export default function SeerInterviewPage() {
   const handleSubmitAnswer = async () => {
     if (!candidateAnswer.trim() || !questionData || isEvaluating) return;
 
+    const authEpoch = getAuthRequestEpoch();
     setIsEvaluating(true);
     setEvaluationError(null);
     try {
@@ -213,6 +223,7 @@ export default function SeerInterviewPage() {
         throw new Error(apiErrorMessage(errorData, "Unable to evaluate your answer. Please try again."));
       }
       const data: EvaluationResult = await res.json();
+      if (getAuthRequestEpoch() !== authEpoch) return;
       setEvaluationResult(data);
       const storedSession = readReposeerSession();
       if (storedSession) {
@@ -228,10 +239,11 @@ export default function SeerInterviewPage() {
       }
       router.push("/seer/interview/results");
     } catch (err) {
+      if (getAuthRequestEpoch() !== authEpoch) return;
       console.error("Error evaluating answer:", err);
       setEvaluationError(err instanceof Error ? err.message : "Unable to evaluate your answer. Please try again.");
     } finally {
-      setIsEvaluating(false);
+      if (getAuthRequestEpoch() === authEpoch) setIsEvaluating(false);
     }
   };
 

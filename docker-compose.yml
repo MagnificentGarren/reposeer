@@ -27,6 +27,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-reposeer}:${POSTGRES_PASSWORD:-reposeer-local-dev}@postgres:5432/${POSTGRES_DB:-reposeer}}
       REPOSEER_RATE_LIMIT_HMAC_KEY: ${REPOSEER_RATE_LIMIT_HMAC_KEY:-}
       REPOSEER_CORS_ORIGINS: ${REPOSEER_CORS_ORIGINS:-http://localhost:3001}
+      # Retained only to process ZIP jobs queued before the upload path was retired.
       REPOSEER_MAX_ARCHIVE_SIZE_MB: ${REPOSEER_MAX_ARCHIVE_SIZE_MB:-25}
       REPOSEER_MAX_EXTRACTED_SIZE_MB: ${REPOSEER_MAX_EXTRACTED_SIZE_MB:-100}
       REPOSEER_MAX_ARCHIVE_FILES: ${REPOSEER_MAX_ARCHIVE_FILES:-2000}
@@ -49,7 +50,6 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-        NEXT_PUBLIC_MAX_ARCHIVE_SIZE_MB: ${REPOSEER_MAX_ARCHIVE_SIZE_MB:-25}
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
     ports:

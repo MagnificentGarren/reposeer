@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Fredoka, Space_Mono } from "next/font/google";
-import AuthControls from "@/components/AuthControls";
 import { AuthProvider } from "@/components/AuthProvider";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
 const fredoka = Fredoka({
@@ -27,11 +27,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`dark ${fredoka.variable} ${mono.variable}`}>
+    <html lang="en" data-theme="default" data-color-scheme="dark" className={`${fredoka.variable} ${mono.variable}`}>
       <body className="bg-[#030908] text-slate-100 antialiased min-h-screen font-sans">
         <AuthProvider>
-          <AuthControls />
-          {children}
+          <ThemeProvider>{children}</ThemeProvider>
         </AuthProvider>
       </body>
     </html>

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import PublicFooter from "@/components/PublicFooter";
+import HomeAction from "@/components/HomeAction";
 
 export default function LandingPage() {
   return (
@@ -39,12 +40,12 @@ export default function LandingPage() {
             </Link>
           </nav>
 
-          <Link
-            href="/seer"
+          <HomeAction
+            showAuthError
             className="px-6 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] text-sm whitespace-nowrap"
           >
             Launch Seer Hub
-          </Link>
+          </HomeAction>
         </div>
       </header>
 
@@ -71,12 +72,11 @@ export default function LandingPage() {
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
-              <Link
-                href="/seer"
+              <HomeAction
                 className="px-8 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-base hover:bg-emerald-400 transition-all shadow-[0_0_25px_rgba(16,185,129,0.35)] text-center"
               >
-                Summon Seer Hub
-              </Link>
+                Sign in and analyze a repository
+              </HomeAction>
               <Link
                 href="/guide"
                 className="px-8 py-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 font-semibold text-base hover:bg-emerald-900/40 transition-all text-center"
@@ -103,11 +103,30 @@ export default function LandingPage() {
           </div>
         </div>
 
+        <section className="rounded-3xl border border-emerald-500/25 bg-emerald-950/20 p-6 sm:p-8">
+          <div className="grid gap-8 md:grid-cols-[1fr_auto] md:items-center">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-400">New here?</p>
+              <h2 className="mt-2 text-2xl font-bold text-slate-100">From sign-in to repository insight in three steps.</h2>
+              <ol className="mt-5 grid gap-4 text-sm text-slate-300 sm:grid-cols-3">
+                <li><span className="font-bold text-emerald-400">1.</span> Sign in to open your private workspace.</li>
+                <li><span className="font-bold text-emerald-400">2.</span> Add a public GitHub repository with Python source.</li>
+                <li><span className="font-bold text-emerald-400">3.</span> Explore its analysis, save the repo, and return anytime.</li>
+              </ol>
+            </div>
+            <div className="rounded-2xl border border-emerald-500/20 bg-slate-950/60 p-5 text-sm">
+              <p className="font-bold text-slate-100">Free plan limits</p>
+              <p className="mt-2 text-slate-300">3 analyses per day · 20 per month</p>
+              <p className="mt-1 text-slate-300">10 AI actions per day · 100 per month</p>
+              <p className="mt-2 max-w-xs text-xs leading-5 text-slate-400">Chat messages, interview questions, and evaluations each use one AI action. Limits reset on the dates shown in your dashboard.</p>
+            </div>
+          </div>
+        </section>
+
         {/* Navigation & Portal Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-12 border-t border-emerald-950/40">
           {/* Card 1: Seer Hub */}
-          <Link
-            href="/seer"
+          <HomeAction
             className="group relative bg-emerald-950/10 border border-emerald-500/20 p-8 rounded-3xl backdrop-blur-sm hover:border-emerald-500/50 transition-all hover:-translate-y-1"
           >
             <div className="flex items-center justify-between mb-6">
@@ -122,9 +141,9 @@ export default function LandingPage() {
               Seer Hub
             </h3>
             <p className="text-slate-400 text-sm leading-relaxed">
-              Feed your repository via GitHub link or ZIP archive. Instant entry to interactive dependency mapping and multi-agent audits.
+              Connect a public GitHub repository to explore dependency mapping and AI-assisted architecture insights.
             </p>
-          </Link>
+          </HomeAction>
 
           {/* Card 2: About / Technical */}
           <Link

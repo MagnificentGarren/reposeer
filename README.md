@@ -64,7 +64,8 @@ Reposeer helps you ask:
 | Feature                        | Description                                              |
 | ------------------------------ | -------------------------------------------------------- |
 | 🐙 **GitHub Analysis**         | Analyse public GitHub repositories                       |
-| 📦 **ZIP Uploads**             | Upload local Python projects for inspection              |
+| 🔐 **Account Dashboard**       | Review plan usage, saved repositories, and reports       |
+| 🎨 **Theme Preferences**       | Choose system-default, light, or dark appearance          |
 | 🌳 **AST Analysis**            | Inspect classes, functions and imports                   |
 | 🕸️ **Dependency Graphs**      | Visualise relationships between modules                  |
 | 🤖 **AI Repository Chat**      | Ask questions about the analysed codebase                |
@@ -79,7 +80,7 @@ Reposeer helps you ask:
 
 ## 01 — 🔌 Connect a Repository
 
-Start by providing a **public GitHub repository URL** or uploading a local ZIP archive.
+Sign in, then provide a **public GitHub repository URL** containing at least one Python source file.
 
 Reposeer takes the repository and begins building an understanding of the codebase.
 
@@ -87,19 +88,7 @@ Reposeer takes the repository and begins building an understanding of the codeba
 
 ---
 
-## 02 — 📦 Upload a Local Project
-
-Working with a local Python project?
-
-Upload it as a ZIP archive.
-
-The current upload flow requires the archive to contain Python source code and limits uploads to **25 MB**.
-
-![Local Project Upload](frontend/public/guide/02-seer-hub-upload.png)
-
----
-
-## 03 — 🧭 Choose Your Mode
+## 02 — 🧭 Choose Your Mode
 
 Once the repository has been analysed, you can choose how you want to interact with it.
 
@@ -400,22 +389,22 @@ Set the Supabase project URL and public anon key in both the server-only and `NE
 | `GEMINI_API_KEY` | Google Gemini key for chat and interview features | unset |
 | `SUPABASE_URL` | Supabase project URL used by the backend to verify access tokens | unset |
 | `SUPABASE_ANON_KEY` | Supabase public anon key sent to the Auth user-verification endpoint | unset |
-| `DATABASE_URL` | PostgreSQL connection string used for reports, durable queued jobs, uploaded archives, and usage data; the API and worker must use the same database | Compose local database |
+| `DATABASE_URL` | PostgreSQL connection string used for reports, durable queued jobs, and usage data; the API and worker must use the same database | Compose local database |
 | `REPOSEER_RATE_LIMIT_HMAC_KEY` | Optional stable secret for hashing client IPs in usage records; defaults to a key derived from `DATABASE_URL` | derived |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Local Compose database settings only; choose a strong local password | local defaults |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase URL used by the frontend auth client | unset |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase public anon key used by the frontend auth client; safe to expose | unset |
 | `NEXT_PUBLIC_API_URL` | Browser-visible backend URL; requires rebuilding the frontend image when changed | `http://localhost:8000` |
 | `REPOSEER_CORS_ORIGINS` | Comma-separated exact frontend origins allowed by the backend | local frontend origins |
-| `REPOSEER_MAX_ARCHIVE_SIZE_MB` | Maximum ZIP upload size; shared with the frontend image build | `25` |
-| `REPOSEER_MAX_EXTRACTED_SIZE_MB` | Maximum expanded ZIP size | `100` |
-| `REPOSEER_MAX_ARCHIVE_FILES` | Maximum number of files in an uploaded ZIP | `2000` |
+| `REPOSEER_MAX_ARCHIVE_SIZE_MB` | Maximum size for legacy ZIP jobs already in the durable queue | `25` |
+| `REPOSEER_MAX_EXTRACTED_SIZE_MB` | Maximum expanded size for legacy queued ZIP jobs | `100` |
+| `REPOSEER_MAX_ARCHIVE_FILES` | Maximum file count for legacy queued ZIP jobs | `2000` |
 | `REPOSEER_REPORT_RETENTION_DAYS` | Report retention period; expired reports are deleted automatically | `7` |
 | `REPOSEER_ANALYSIS_STALE_SECONDS` | Time without reported job progress before recovery is allowed | `300` |
 
-The initial invited-beta quotas are **3 successful analyses per day and 20 per month per account**, **1 concurrent analysis**, and **10 AI actions per day and 100 per month per account**. Shared IP limits are **10 successful analyses per day and 100 per month**, plus **30 AI actions per day and 300 per month**. A ZIP is limited to 25 MB compressed, 100 MB extracted, and 2,000 files. Daily and monthly quota exhaustion returns HTTP 429; an existing active analysis returns HTTP 409 instead. Analysis usage is reserved at start and removed when an attempt ultimately fails; worker restarts and stale-job requeues do not consume additional quota.
+The Free plan currently allows **3 analyses per day and 20 per month per account**, **1 concurrent analysis**, and **10 AI actions per day and 100 per month per account**. Shared IP limits are **10 analyses per day and 100 per month**, plus **30 AI actions per day and 300 per month**. The signed-in dashboard displays account usage and reset times; a chat message, interview question, or evaluation consumes one AI action. Paid and Premium plans and checkout are not available yet. ZIP uploads have been retired; existing queued ZIP work remains processable while the legacy worker path is retained.
 
-Analysis jobs are inserted into PostgreSQL with their source information in the same transaction as the quota reservation. Each running API instance also runs a queue polling loop in its backend process; it claims jobs using PostgreSQL row locks and renewable leases. This co-located worker avoids requiring a separately billed service. Interrupted jobs become claimable again after the lease expires, with up to three processing attempts. ZIP bytes are stored in the job row until it completes or fails, then cleared. Workers extract archives and clone repositories into temporary folders, which are removed when work ends and swept if older than 24 hours. There is no Redis requirement: PostgreSQL is both the durable job queue and the database for reports and usage data.
+Analysis jobs are inserted into PostgreSQL with their source information in the same transaction as the quota reservation. Each running API instance also runs a queue polling loop in its backend process; it claims jobs using PostgreSQL row locks and renewable leases. This co-located worker avoids requiring a separately billed service. Interrupted jobs become claimable again after the lease expires, with up to three processing attempts. Legacy ZIP bytes are stored in the job row until the job completes or fails, then cleared. Workers clone repositories into temporary folders, which are removed when work ends and swept if older than 24 hours. There is no Redis requirement: PostgreSQL is both the durable job queue and the database for reports and usage data.
 
 The API reads progress from PostgreSQL, so any API instance can report progress for work handled by any instance. The browser reconnects by polling the saved job state and retries temporary network/API errors with a bounded backoff. The SSE endpoint is also available for clients that prefer streaming. If an instance stops updating a job, its lease expires and another running instance can retry it. Signed-in users can reconnect to their active analysis from Seer Hub after a refresh or dropped connection. The recovery action requeues a stale job instead of discarding it. Reports, including repository excerpts used for the AI context, are private to the verified account and retained for 7 days by default. Users can review and delete their saved reports from **Seer Hub → View saved reports**. Usage records keep account IDs and keyed IP hashes for up to 13 months for quota enforcement and operational monitoring.
 
@@ -503,7 +492,7 @@ http://localhost:8000/docs
 
 The backend responds at `http://localhost:8000/health`. Compose waits for the backend health check before starting the frontend and reports health for both services.
 
-The backend persists inspection job metadata in PostgreSQL, but analysis workers are scheduled in process memory. Run one backend worker and a single backend replica; use a persistent job queue before scaling horizontally. For deployment behind a reverse proxy, allow request bodies up to the configured ZIP limit plus multipart overhead, and preserve long-lived responses from `/api/inspect/stream/` and `/api/seer/chat`.
+The backend persists inspection job metadata in PostgreSQL, but analysis workers are scheduled in process memory. Run one backend worker and a single backend replica; use a persistent job queue before scaling horizontally. For deployment behind a reverse proxy, allow the backend's 1 MB request body limit and preserve long-lived responses from `/api/inspect/stream/` and `/api/seer/chat`.
 
 ### Stop the application
 
@@ -590,7 +579,12 @@ http://localhost:3000
 | `GET`  | `/`                                | Backend health response             |
 | `GET`  | `/health`                          | Container health check               |
 | `POST` | `/api/inspect/github`              | Analyse a public GitHub repository (bearer token required) |
-| `POST` | `/api/inspect/upload`              | Analyse an uploaded ZIP archive (bearer token required) |
+| `GET`  | `/api/inspect/usage`               | Return the authenticated account's plan usage and reset times |
+| `GET`  | `/api/inspect/repositories`        | List saved GitHub repositories |
+| `POST` | `/api/inspect/repositories`        | Save a GitHub repository |
+| `DELETE` | `/api/inspect/repositories/{id}` | Remove a saved repository |
+| `GET`  | `/api/inspect/preferences`         | Read the account appearance preference |
+| `PUT`  | `/api/inspect/preferences`         | Save the account appearance preference |
 | `GET`  | `/api/inspect/stream/{job_id}`     | Stream progress for the verified job owner |
 | `POST` | `/api/seer/chat`                   | AI-assisted repository conversation (bearer token required) |
 | `POST` | `/api/interview/generate-question` | Generate an interview scenario (bearer token required) |
@@ -663,7 +657,7 @@ From the `backend` directory:
 pytest
 ```
 
-The backend tests cover Supabase bearer-token validation, quota rejection, analysis/report ownership, ZIP validation, job progress and failure states, chat/interview flows, and checks that provider failures do not expose credentials or source code in logs. AI-provider calls are mocked; staging behavior still needs to be verified against the deployed services.
+The backend tests cover Supabase bearer-token validation, quota rejection, analysis/report ownership, retired ZIP ingestion, saved repositories and preferences, job progress and failure states, chat/interview flows, and checks that provider failures do not expose credentials or source code in logs. AI-provider calls are mocked; staging behavior still needs to be verified against the deployed services.
 
 ### Frontend Linting
 
@@ -685,8 +679,7 @@ npm run build
 Some important considerations when running Reposeer:
 
 * 🔑 Never commit `.env` files or API keys.
-* 📦 ZIP uploads must contain Python source files.
-* 📏 ZIP uploads default to 25 MB and can be configured with `REPOSEER_MAX_ARCHIVE_SIZE_MB`.
+* 🐍 Repository analysis requires at least one Python source file and currently supports public GitHub repositories only.
 * 🧠 Analysis jobs are currently stored temporarily in memory.
 * 🐙 GitHub ingestion currently supports public repositories.
 * 🌐 Configure `REPOSEER_CORS_ORIGINS` for the deployed frontend origin; wildcard origins are rejected.

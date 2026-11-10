@@ -159,6 +159,7 @@ class DatabaseStore:
         input_type: str | None = None,
         input_payload: dict | None = None,
         input_archive: bytes | None = None,
+        repository_url: str | None = None,
     ) -> str:
         job_uuid = UUID(job_id) if job_id else uuid4()
         owner_uuid = UUID(owner_id)
@@ -201,15 +202,16 @@ class DatabaseStore:
                     """
                     INSERT INTO analysis_jobs (
                         id, owner_id, status, progress, message,
-                        input_type, input_payload, input_archive
+                        input_type, input_payload, input_archive, repository_url
                     )
-                    VALUES ($1, $2, 'queued', 5, 'Initializing analysis pipeline...', $3, $4, $5)
+                    VALUES ($1, $2, 'queued', 5, 'Initializing analysis pipeline...', $3, $4, $5, $6)
                     """,
                     job_uuid,
                     owner_uuid,
                     input_type,
                     input_payload,
                     input_archive,
+                    repository_url,
                 )
                 await connection.execute(
                     """
@@ -372,6 +374,138 @@ class DatabaseStore:
             subject,
         )
         return int(row["daily"]), int(row["monthly"])
+
+    async def get_usage(self, owner_id: str) -> dict:
+        row = await self.pool.fetchrow(
+            """
+            SELECT
+                count(*) FILTER (
+                    WHERE action = 'analysis'
+                      AND created_at >= date_trunc('day', now())
+                ) AS analyses_daily,
+                count(*) FILTER (
+                    WHERE action = 'analysis'
+                      AND created_at >= date_trunc('month', now())
+                ) AS analyses_monthly,
+                count(*) FILTER (
+                    WHERE action <> 'analysis'
+                      AND created_at >= date_trunc('day', now())
+                ) AS ai_daily,
+                count(*) FILTER (
+                    WHERE action <> 'analysis'
+                      AND created_at >= date_trunc('month', now())
+                ) AS ai_monthly,
+                date_trunc('day', now()) + interval '1 day' AS daily_reset,
+                date_trunc('month', now()) + interval '1 month' AS monthly_reset
+            FROM usage_records
+            WHERE owner_id = $1
+            """,
+            UUID(owner_id),
+        )
+
+        def quota(used: int, limit: int, reset_at) -> dict:
+            return {
+                "used": used,
+                "limit": limit,
+                "remaining": max(0, limit - used),
+                "resets_at": reset_at.isoformat(),
+            }
+
+        return {
+            "plan": "free",
+            "analyses": {
+                "daily": quota(int(row["analyses_daily"]), ANALYSES_PER_DAY, row["daily_reset"]),
+                "monthly": quota(int(row["analyses_monthly"]), ANALYSES_PER_MONTH, row["monthly_reset"]),
+            },
+            "ai_actions": {
+                "daily": quota(int(row["ai_daily"]), AI_ACTIONS_PER_DAY, row["daily_reset"]),
+                "monthly": quota(int(row["ai_monthly"]), AI_ACTIONS_PER_MONTH, row["monthly_reset"]),
+            },
+        }
+
+    async def list_saved_repositories(self, owner_id: str) -> list[dict]:
+        rows = await self.pool.fetch(
+            """
+            SELECT saved.id, saved.repository_url, saved.repository_name, saved.created_at,
+                   latest.id AS latest_report_id, latest.created_at AS last_analyzed_at
+            FROM saved_repositories saved
+            LEFT JOIN LATERAL (
+                SELECT report.analysis_job_id AS id, report.created_at
+                FROM reports report
+                JOIN analysis_jobs job ON job.id = report.analysis_job_id
+                WHERE report.owner_id = saved.owner_id
+                  AND job.repository_url = saved.repository_url
+                  AND report.expires_at > now()
+                ORDER BY report.created_at DESC
+                LIMIT 1
+            ) latest ON TRUE
+            WHERE saved.owner_id = $1
+            ORDER BY saved.created_at DESC
+            """,
+            UUID(owner_id),
+        )
+        return [
+            {
+                "id": str(row["id"]),
+                "repository_url": row["repository_url"],
+                "repository_name": row["repository_name"],
+                "created_at": row["created_at"].isoformat(),
+                "latest_report_id": str(row["latest_report_id"]) if row["latest_report_id"] else None,
+                "last_analyzed_at": row["last_analyzed_at"].isoformat() if row["last_analyzed_at"] else None,
+            }
+            for row in rows
+        ]
+
+    async def save_repository(self, owner_id: str, repository_url: str, repository_name: str) -> dict:
+        row = await self.pool.fetchrow(
+            """
+            INSERT INTO saved_repositories (owner_id, repository_url, repository_name)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (owner_id, repository_url) DO UPDATE
+                SET repository_name = EXCLUDED.repository_name
+            RETURNING id, repository_url, repository_name, created_at
+            """,
+            UUID(owner_id),
+            repository_url,
+            repository_name,
+        )
+        return {
+            "id": str(row["id"]),
+            "repository_url": row["repository_url"],
+            "repository_name": row["repository_name"],
+            "created_at": row["created_at"].isoformat(),
+        }
+
+    async def delete_saved_repository(self, repository_id: str, owner_id: str) -> bool:
+        deleted = await self.pool.fetchval(
+            """
+            DELETE FROM saved_repositories
+            WHERE id = $1 AND owner_id = $2
+            RETURNING id
+            """,
+            UUID(repository_id),
+            UUID(owner_id),
+        )
+        return deleted is not None
+
+    async def get_theme_preference(self, owner_id: str) -> str:
+        theme = await self.pool.fetchval(
+            "SELECT theme FROM user_preferences WHERE owner_id = $1",
+            UUID(owner_id),
+        )
+        return theme or "default"
+
+    async def set_theme_preference(self, owner_id: str, theme: str) -> None:
+        await self.pool.execute(
+            """
+            INSERT INTO user_preferences (owner_id, theme)
+            VALUES ($1, $2)
+            ON CONFLICT (owner_id) DO UPDATE
+                SET theme = EXCLUDED.theme, updated_at = now()
+            """,
+            UUID(owner_id),
+            theme,
+        )
 
     async def update_job(
         self,
@@ -539,8 +673,10 @@ class DatabaseStore:
         rows = await self.pool.fetch(
             """
             SELECT r.analysis_job_id AS id, r.created_at, r.expires_at,
-                   r.result->>'files_analyzed' AS files_analyzed
+                   r.result->>'files_analyzed' AS files_analyzed,
+                   j.repository_url
             FROM reports r
+            JOIN analysis_jobs j ON j.id = r.analysis_job_id
             WHERE r.owner_id = $1 AND r.expires_at > now()
             ORDER BY r.created_at DESC
             """,
@@ -552,6 +688,12 @@ class DatabaseStore:
                 "created_at": row["created_at"].isoformat(),
                 "expires_at": row["expires_at"].isoformat(),
                 "files_analyzed": int(row["files_analyzed"] or 0),
+                "repository_url": row["repository_url"],
+                "repository_name": (
+                    "/".join(row["repository_url"].rstrip("/").split("/")[-2:])
+                    if row["repository_url"]
+                    else f"Analysis {str(row['id'])[:8]}"
+                ),
             }
             for row in rows
         ]
@@ -559,8 +701,10 @@ class DatabaseStore:
     async def get_report(self, report_id: str, owner_id: str) -> dict | None:
         row = await self.pool.fetchrow(
             """
-            SELECT r.analysis_job_id AS id, r.result, r.created_at, r.expires_at
+            SELECT r.analysis_job_id AS id, r.result, r.created_at, r.expires_at,
+                   j.repository_url
             FROM reports r
+            JOIN analysis_jobs j ON j.id = r.analysis_job_id
             WHERE r.analysis_job_id = $1 AND r.owner_id = $2 AND r.expires_at > now()
             """,
             UUID(report_id),
@@ -573,6 +717,7 @@ class DatabaseStore:
             "result": row["result"],
             "created_at": row["created_at"].isoformat(),
             "expires_at": row["expires_at"].isoformat(),
+            "repository_url": row["repository_url"],
         }
 
     async def delete_report(self, report_id: str, owner_id: str) -> bool:

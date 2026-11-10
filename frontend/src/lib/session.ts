@@ -22,6 +22,18 @@ export interface ReposeerSession {
 export const REPOSEER_SESSION_KEY = "reposeer_session";
 export const LEGACY_REPORT_KEY = "reposeer_latest_report";
 export const LEGACY_CHAT_KEY = "reposeer_casual_chat_history";
+const AUTH_REQUEST_EPOCH_KEY = "reposeer_auth_request_epoch";
+
+export const getAuthRequestEpoch = (): number => {
+  if (typeof window === "undefined") return 0;
+  return Number(window.localStorage.getItem(AUTH_REQUEST_EPOCH_KEY) || "0");
+};
+
+export const invalidateAuthRequests = (): void => {
+  if (typeof window === "undefined") return;
+  const nextEpoch = getAuthRequestEpoch() + 1;
+  window.localStorage.setItem(AUTH_REQUEST_EPOCH_KEY, String(nextEpoch));
+};
 
 export const createEmptyInterviewSession = (): InterviewSession => ({
   difficulty: "Easy",

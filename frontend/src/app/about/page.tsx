@@ -1,5 +1,6 @@
 import Link from "next/link";
 import PublicFooter from "@/components/PublicFooter";
+import HomeAction from "@/components/HomeAction";
 import {
   ArrowRight,
   Boxes,
@@ -19,7 +20,7 @@ const pipeline = [
     number: "01",
     icon: GitBranch,
     title: "Ingest",
-    text: "Accept a GitHub repository or local source archive, then walk the project while skipping generated and environment folders.",
+    text: "Connect a public GitHub repository, then inspect Python source while skipping generated and environment folders.",
     detail: "GitPython · UTF-8 source collection",
   },
   {
@@ -84,12 +85,11 @@ export default function AboutPage() {
             </Link>
           </nav>
 
-          <Link
-            href="/seer"
+          <HomeAction
             className="px-6 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] text-sm whitespace-nowrap"
           >
             Launch Seer Hub
-          </Link>
+          </HomeAction>
         </div>
       </header>
 
@@ -179,7 +179,7 @@ export default function AboutPage() {
 
         <section className="flex flex-col items-start justify-between gap-6 border border-emerald-500/25 bg-emerald-950/20 p-8 sm:flex-row sm:items-center sm:p-10">
           <div><p className="font-mono text-xs uppercase tracking-[0.2em] text-emerald-400">Ready to inspect?</p><h2 className="mt-3 text-2xl font-bold text-slate-100">Bring a repository into focus.</h2></div>
-          <Link href="/seer" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400">Launch Seer Hub <ArrowRight className="h-4 w-4" /></Link>
+          <HomeAction className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400">Launch Seer Hub <ArrowRight className="h-4 w-4" /></HomeAction>
         </section>
       </main>
 

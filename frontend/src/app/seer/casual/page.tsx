@@ -9,6 +9,7 @@ import {
   clearReposeerSession,
   readReposeerSession,
   writeReposeerSession,
+  getAuthRequestEpoch,
 } from "@/lib/session";
 import type { ChatMessage } from "@/lib/session";
 import { API_BASE_URL } from "@/lib/config";
@@ -83,6 +84,7 @@ export default function SeerCasualPage() {
   const [showResetModal, setShowResetModal] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const authEpochRef = useRef(getAuthRequestEpoch());
 
   // 1. Load Session Report & Persisted Chat History on Mount
   useEffect(() => {
@@ -108,7 +110,12 @@ export default function SeerCasualPage() {
 
   // 2. Persist Chat Messages whenever updated
   useEffect(() => {
-    if (typeof window !== "undefined" && report && messages.length > 0) {
+    if (
+      typeof window !== "undefined" &&
+      getAuthRequestEpoch() === authEpochRef.current &&
+      report &&
+      messages.length > 0
+    ) {
       const storedSession = readReposeerSession();
       if (storedSession?.report) {
         writeReposeerSession({ ...storedSession, casualMessages: messages });
@@ -165,6 +172,7 @@ export default function SeerCasualPage() {
     if (!promptToSend.trim() || isLoading) return;
 
     const userQuery = promptToSend.trim();
+    const authEpoch = getAuthRequestEpoch();
     const newMessages: ChatMessage[] = [
       ...messages,
       { sender: "user", text: userQuery },
@@ -184,6 +192,7 @@ export default function SeerCasualPage() {
           report_context: report,
         }),
       });
+      if (getAuthRequestEpoch() !== authEpoch) return;
 
       if (!response.ok || !response.body) {
         const errorData = await response.json().catch(() => ({}));
@@ -195,6 +204,10 @@ export default function SeerCasualPage() {
 
       while (true) {
         const { value, done } = await reader.read();
+        if (getAuthRequestEpoch() !== authEpoch) {
+          await reader.cancel();
+          return;
+        }
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
@@ -207,6 +220,7 @@ export default function SeerCasualPage() {
         });
       }
     } catch (err) {
+      if (getAuthRequestEpoch() !== authEpoch) return;
       const message = err instanceof Error
         ? err.message
         : "Unable to complete the assistant response. Please try again.";
@@ -219,7 +233,7 @@ export default function SeerCasualPage() {
         return updated;
       });
     } finally {
-      setIsLoading(false);
+      if (getAuthRequestEpoch() === authEpoch) setIsLoading(false);
     }
   };
 

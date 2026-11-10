@@ -9,7 +9,7 @@ import {
   type PropsWithChildren,
 } from "react";
 import type { User } from "@supabase/supabase-js";
-import { clearReposeerSession } from "@/lib/session";
+import { clearReposeerSession, invalidateAuthRequests } from "@/lib/session";
 import { getSupabaseClient } from "@/lib/supabase";
 
 interface AuthContextValue {
@@ -57,6 +57,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
         (event === "SIGNED_IN" && userIdRef.current !== nextUser?.id)
       ) {
         clearReposeerSession();
+        window.localStorage.removeItem("reposeer_active_analysis_job");
+        if (event === "SIGNED_OUT") {
+          invalidateAuthRequests();
+        }
       }
 
       userIdRef.current = nextUser?.id ?? null;
@@ -86,11 +90,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  const signIn = async () => {
+  const signIn = async (returnTo = "/seer") => {
     setAuthError(null);
     const client = getSupabaseClient();
     const callbackUrl = new URL("/auth/callback", window.location.origin);
-    const returnTo = `${window.location.pathname}${window.location.search}`;
     callbackUrl.searchParams.set("next", returnTo);
 
     const { error } = await client.auth.signInWithOAuth({
@@ -102,9 +105,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const signOut = async () => {
     setAuthError(null);
-    const { error } = await getSupabaseClient().auth.signOut();
-    if (error) throw error;
     clearReposeerSession();
+    window.localStorage.removeItem("reposeer_active_analysis_job");
+    invalidateAuthRequests();
+    userIdRef.current = null;
+    setUser(null);
+    const { error } = await getSupabaseClient().auth.signOut();
+    if (error) {
+      setAuthError(error.message);
+      throw error;
+    }
   };
 
   return (

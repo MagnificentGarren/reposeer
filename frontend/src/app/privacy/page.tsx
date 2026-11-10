@@ -31,12 +31,14 @@ export default function PrivacyPage() {
           Privacy &amp; Data Handling Notice
         </h1>
         <div className="mt-8 space-y-8">
-          <section aria-labelledby="uploaded-archives">
-            <h2 id="uploaded-archives" className="text-lg font-semibold text-slate-100">
-              Uploaded archives
+          <section aria-labelledby="saved-repositories">
+            <h2 id="saved-repositories" className="text-lg font-semibold text-slate-100">
+              Saved repositories and preferences
             </h2>
             <p className="mt-2 leading-relaxed text-slate-300">
-              Archives are processed temporarily and removed after analysis.
+              Saved GitHub repository URLs remain linked to your account until you remove
+              them. Your appearance preference is stored with your account so it can be
+              applied when you return.
             </p>
           </section>
 

@@ -18,7 +18,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.api import chat, inspect, interview
 from app.services.database import create_database_pool, run_database_maintenance, DatabaseStore
-from app.services.ingestion import MAX_ARCHIVE_SIZE_BYTES
 from app.worker import run_worker_loop
 
 
@@ -48,7 +47,7 @@ def _configured_cors_origins() -> list[str]:
     return origins
 
 
-MAX_REQUEST_SIZE_BYTES = MAX_ARCHIVE_SIZE_BYTES + 1024 * 1024
+MAX_REQUEST_SIZE_BYTES = 1024 * 1024
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
@@ -95,7 +94,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_configured_cors_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
@@ -109,10 +108,9 @@ async def enforce_request_size_limit(request, call_next):
         except ValueError:
             return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header."})
         if request_size > MAX_REQUEST_SIZE_BYTES:
-            limit_mb = MAX_ARCHIVE_SIZE_BYTES // (1024 * 1024)
             return JSONResponse(
                 status_code=413,
-                content={"detail": f"Request is too large. ZIP archives are limited to {limit_mb}MB."},
+                content={"detail": "Request is too large."},
             )
     return await call_next(request)
 

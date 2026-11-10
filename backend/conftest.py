@@ -14,9 +14,12 @@ class FakeDatabaseStore:
         self.reports = {}
         self.ai_actions = []
         self.analysis_usage = []
+        self.saved_repositories = {}
+        self.theme_preferences = {}
 
     async def create_analysis(
-        self, owner_id, ip_hash, job_id=None, *, input_type=None, input_payload=None, input_archive=None
+        self, owner_id, ip_hash, job_id=None, *, input_type=None, input_payload=None, input_archive=None,
+        repository_url=None
     ):
         if any(
             job["owner_id"] == owner_id and job["status"] in ("queued", "processing")
@@ -39,6 +42,7 @@ class FakeDatabaseStore:
             "input_type": input_type,
             "input_payload": input_payload,
             "input_archive": input_archive,
+            "repository_url": repository_url,
             "worker_id": None,
         }
         self.analysis_usage.append(job_id)
@@ -114,6 +118,47 @@ class FakeDatabaseStore:
 
     async def consume_ai_action(self, owner_id, ip_hash, action):
         self.ai_actions.append((owner_id, ip_hash, action))
+
+    async def get_usage(self, owner_id):
+        return {
+            "plan": "free",
+            "analyses": {
+                "daily": {"used": 1, "limit": 3, "remaining": 2, "resets_at": "2026-11-11T00:00:00+00:00"},
+                "monthly": {"used": 1, "limit": 20, "remaining": 19, "resets_at": "2026-12-01T00:00:00+00:00"},
+            },
+            "ai_actions": {
+                "daily": {"used": 2, "limit": 10, "remaining": 8, "resets_at": "2026-11-11T00:00:00+00:00"},
+                "monthly": {"used": 2, "limit": 100, "remaining": 98, "resets_at": "2026-12-01T00:00:00+00:00"},
+            },
+        }
+
+    async def list_saved_repositories(self, owner_id):
+        return list(self.saved_repositories.values())
+
+    async def save_repository(self, owner_id, repository_url, repository_name):
+        repository = {
+            "id": str(uuid.uuid4()),
+            "repository_url": repository_url,
+            "repository_name": repository_name,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "latest_report_id": None,
+            "last_analyzed_at": None,
+        }
+        self.saved_repositories[repository_url] = repository
+        return repository
+
+    async def delete_saved_repository(self, repository_id, owner_id):
+        for repository_url, repository in list(self.saved_repositories.items()):
+            if repository["id"] == repository_id:
+                self.saved_repositories.pop(repository_url)
+                return True
+        return False
+
+    async def get_theme_preference(self, owner_id):
+        return self.theme_preferences.get(owner_id, "default")
+
+    async def set_theme_preference(self, owner_id, theme):
+        self.theme_preferences[owner_id] = theme
 
     async def list_reports(self, owner_id):
         return [
