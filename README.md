@@ -4,13 +4,15 @@
 
 > **Don't just read the codebase. Understand it. Challenge it. Defend it.**
 
+## 🚀 [Try Reposeer Live →](https://reposeer.vercel.app/)
+
+Sign in and analyze a public GitHub repository.
+
 Reposeer is an AI-assisted developer tool designed to turn unfamiliar Python repositories into something you can actually **understand, explore, and reason about**.
 
 It combines **static code analysis, AST parsing, dependency mapping, repository inspection, AI-powered conversation, and architectural interview simulation** into one platform.
 
 Whether you're trying to understand a new codebase, investigate its architecture, or test whether you can explain your own engineering decisions under pressure — **Reposeer is built to make you think like a technical lead.** 🧠
-
-> **Try Reposeer:** [reposeer.vercel.app](https://reposeer.vercel.app/) — sign in to analyze a public GitHub repository.
 
 ---
 
