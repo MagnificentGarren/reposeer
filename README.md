@@ -10,6 +10,8 @@ It combines **static code analysis, AST parsing, dependency mapping, repository 
 
 Whether you're trying to understand a new codebase, investigate its architecture, or test whether you can explain your own engineering decisions under pressure — **Reposeer is built to make you think like a technical lead.** 🧠
 
+> **Try Reposeer:** [reposeer.vercel.app](https://reposeer.vercel.app/) — sign in to analyze a public GitHub repository.
+
 ---
 
 ## 🚀 What is Reposeer?
@@ -63,16 +65,16 @@ Reposeer helps you ask:
 
 | Feature                        | Description                                              |
 | ------------------------------ | -------------------------------------------------------- |
-| 🐙 **GitHub Analysis**         | Analyse public GitHub repositories                       |
+| 🐙 **GitHub Analysis**         | Analyse public GitHub repositories that contain Python source |
 | 🔐 **Account Dashboard**       | Review plan usage, saved repositories, and reports       |
-| 🎨 **Theme Preferences**       | Choose system-default, light, or dark appearance          |
-| 🌳 **AST Analysis**            | Inspect classes, functions and imports                   |
-| 🕸️ **Dependency Graphs**      | Visualise relationships between modules                  |
-| 🤖 **AI Repository Chat**      | Ask questions about the analysed codebase                |
-| 🎯 **Interview Mode**          | Practise repository-aware architecture interviews        |
-| ⚡ **Live Analysis**            | Stream analysis progress to the frontend                 |
-| 📊 **Evaluation Metrics**      | Receive structured feedback on interview responses       |
-| 🧠 **Architectural Reasoning** | Explore maintainability, modularity and design decisions |
+| 🎨 **Theme Preferences**       | Choose system-default, light, or dark appearance         |
+| 🌳 **AST Analysis**            | Inspect classes, functions, and imports                  |
+| 🕸️ **Dependency Graphs**      | Visualise relationships between modules                 |
+| 🤖 **AI Repository Chat**      | Ask questions about the analysed codebase               |
+| 🎯 **Interview Mode**          | Practise repository-aware architecture interviews       |
+| ⚡ **Live Analysis**            | Follow analysis progress and reconnect to active jobs   |
+| 📊 **Evaluation Metrics**      | Receive structured feedback on interview responses      |
+| 🧠 **Architectural Reasoning** | Explore maintainability, modularity, and design decisions |
 
 ---
 
@@ -85,6 +87,12 @@ Sign in, then provide a **public GitHub repository URL** containing at least one
 Reposeer takes the repository and begins building an understanding of the codebase.
 
 ![Repository Connection](frontend/public/guide/01-seer-hub-github.png)
+
+### Archived upload screen
+
+The following screenshot is retained for reference. Local ZIP uploads are not currently supported; connect a public GitHub repository instead.
+
+![Archived ZIP Upload Screen](frontend/public/guide/02-seer-hub-upload.png)
 
 ---
 
@@ -243,8 +251,8 @@ flowchart LR
     Frontend --> Chat[💬 Casual Chat API]
     Frontend --> Interview[🎯 Interview API]
 
-    Inspect --> Queue[(🗄️ PostgreSQL durable job queue)]
-    Queue --> Worker[⚙️ Separate analysis worker]
+    Inspect --> Queue[(🗄️ PostgreSQL jobs and reports)]
+    Queue --> Worker[⚙️ In-process queue poller]
     Worker --> Ingestion[📦 Repository Ingestion]
     Ingestion --> Parser[🌳 Tree-sitter AST Parser]
     Parser --> Graph[🕸️ Dependency Graph Mapper]
@@ -361,6 +369,10 @@ reposeer/
 
 # ⚡ Getting Started
 
+## 🌐 Live application
+
+The public Reposeer frontend is deployed at [reposeer.vercel.app](https://reposeer.vercel.app/). The app uses a separately configured API backend; when deploying your own copy, set the frontend's `NEXT_PUBLIC_API_URL` to the browser-accessible API origin and configure the backend's CORS allowlist for the frontend origin.
+
 ## 📋 Requirements
 
 Before running Reposeer locally, make sure you have:
@@ -389,7 +401,7 @@ Set the Supabase project URL and public anon key in both the server-only and `NE
 | `GEMINI_API_KEY` | Google Gemini key for chat and interview features | unset |
 | `SUPABASE_URL` | Supabase project URL used by the backend to verify access tokens | unset |
 | `SUPABASE_ANON_KEY` | Supabase public anon key sent to the Auth user-verification endpoint | unset |
-| `DATABASE_URL` | PostgreSQL connection string used for reports, durable queued jobs, and usage data; the API and worker must use the same database | Compose local database |
+| `DATABASE_URL` | PostgreSQL connection string used for reports, durable queued jobs, and usage data by the API and its queue poller | Compose local database |
 | `REPOSEER_RATE_LIMIT_HMAC_KEY` | Optional stable secret for hashing client IPs in usage records; defaults to a key derived from `DATABASE_URL` | derived |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Local Compose database settings only; choose a strong local password | local defaults |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase URL used by the frontend auth client | unset |
@@ -402,25 +414,23 @@ Set the Supabase project URL and public anon key in both the server-only and `NE
 | `REPOSEER_REPORT_RETENTION_DAYS` | Report retention period; expired reports are deleted automatically | `7` |
 | `REPOSEER_ANALYSIS_STALE_SECONDS` | Time without reported job progress before recovery is allowed | `300` |
 
-The Free plan currently allows **3 analyses per day and 20 per month per account**, **1 concurrent analysis**, and **10 AI actions per day and 100 per month per account**. Shared IP limits are **10 analyses per day and 100 per month**, plus **30 AI actions per day and 300 per month**. The signed-in dashboard displays account usage and reset times; a chat message, interview question, or evaluation consumes one AI action. Paid and Premium checkout is not available yet. The subscription screen displays proposed pricing of **$12/month or $120/year** for Paid and **$29/month or $290/year** for Premium, with higher proposed usage limits; these prices and paid limits are not active or enforced until launch. ZIP uploads have been retired; existing queued ZIP work remains processable while the legacy worker path is retained.
+The Free plan currently allows **3 analyses per day and 20 per month per account**, **1 concurrent analysis**, and **10 AI actions per day and 100 per month per account**. Shared IP limits are **10 analyses per day and 100 per month**, plus **30 AI actions per day and 300 per month**. The signed-in dashboard displays account usage and reset times; a chat message, interview question, or evaluation consumes one AI action. Paid and Premium checkout is not available yet. The subscription screen displays proposed pricing of **$12/month or $120/year** for Paid and **$29/month or $290/year** for Premium, with higher proposed usage limits; these prices and paid limits are not active or enforced until launch. Repository analysis currently accepts public GitHub URLs; local ZIP uploads are not supported.
 
 Analysis jobs are inserted into PostgreSQL with their source information in the same transaction as the quota reservation. Each running API instance also runs a queue polling loop in its backend process; it claims jobs using PostgreSQL row locks and renewable leases. This co-located worker avoids requiring a separately billed service. Interrupted jobs become claimable again after the lease expires, with up to three processing attempts. Legacy ZIP bytes are stored in the job row until the job completes or fails, then cleared. Workers clone repositories into temporary folders, which are removed when work ends and swept if older than 24 hours. There is no Redis requirement: PostgreSQL is both the durable job queue and the database for reports and usage data.
 
 The API reads progress from PostgreSQL, so any API instance can report progress for work handled by any instance. The browser reconnects by polling the saved job state and retries temporary network/API errors with a bounded backoff. The SSE endpoint is also available for clients that prefer streaming. If an instance stops updating a job, its lease expires and another running instance can retry it. Signed-in users can reconnect to their active analysis from Seer Hub after a refresh or dropped connection. The recovery action requeues a stale job instead of discarding it. Reports, including repository excerpts used for the AI context, are private to the verified account and retained for 7 days by default. Users can review and delete their saved reports from **Seer Hub → View saved reports**. Usage records keep account IDs and keyed IP hashes for up to 13 months for quota enforcement and operational monitoring.
 
-### Deploying durable analysis jobs on Render
+### Deploying the backend
 
-The local Compose stack starts PostgreSQL, the API (including its queue polling loop), and the frontend. For the existing Render backend service:
+The Vercel deployment serves the frontend. The API and PostgreSQL database are configured separately. For a hosted backend:
 
-1. Keep using the existing Render web service. Deploy the backend changes to its current branch; startup launches the API and its queue poller together. Do **not** create a separate Render worker service.
-2. Confirm that the backend's `DATABASE_URL` points to a persistent PostgreSQL database and that the backend can reach it. The startup migration needs permission to alter the schema. Back up the database; jobs and reports are only as durable as this database.
-3. Keep the existing API start command and runtime settings. The queue poller starts automatically when the app connects to PostgreSQL. The worker uses the same service environment, including GitHub outbound HTTPS access for public repository clones.
-4. Monitor backend logs for the `Analysis worker ... started` message, job processing errors, and database connectivity. The service must be running to process jobs.
-5. Test an API restart during analysis. The job remains queued/processing in PostgreSQL and can be reclaimed after its lease expires. If the Render instance sleeps or is stopped, analysis pauses until the service runs again; it is not lost.
-6. This is a cost-saving compromise, not full worker/API isolation: analysis uses the same CPU and memory as API requests. If Render runs multiple backend instances, each will poll the same queue and PostgreSQL will coordinate job claims.
-7. Keep a database backup and test restoration. The queue and reports are only as durable as PostgreSQL.
+1. Configure `DATABASE_URL` to point to a persistent PostgreSQL database. The backend applies pending schema migrations at startup.
+2. Set the required backend secrets and URLs, including `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `REPOSEER_CORS_ORIGINS`. The CORS origin must exactly match the deployed frontend origin.
+3. Set `NEXT_PUBLIC_API_URL` in the Vercel project to the browser-accessible backend URL, along with the frontend Supabase settings. Rebuild the frontend after changing `NEXT_PUBLIC_` values.
+4. The backend starts its queue poller in the API process when PostgreSQL is configured; a separate worker service is not required. Monitor backend logs for worker startup, job failures, and database connectivity.
+5. Keep a database backup and test restoration. Analysis jobs and reports are only as durable as PostgreSQL, and analysis shares CPU and memory with API requests.
 
-No separate worker service, Redis, object-storage bucket, shared temporary filesystem, or worker-facing HTTP route is required by this configuration.
+The local Compose stack starts PostgreSQL, the API, and the frontend. Redis is not required.
 
 ⚠️ **Never commit API keys, credentials, or other secrets to GitHub.**
 
@@ -456,13 +466,13 @@ The browser signs in with Google through Supabase Auth. The backend verifies eac
 10. **Confirm retention and privacy wording.** Before inviting users, confirm whether the 7-day report retention is acceptable and publish privacy-notice text explaining that report data (including repository excerpts) and quota/usage records are stored server-side. The current backend default is 7 days; change `REPOSEER_REPORT_RETENTION_DAYS` only after deciding and updating the notice.
 11. **Restart and verify.** Run `docker compose up --build` (or restart the local frontend and backend). Open the site, choose **Sign in with Google**, complete the Google consent flow, and return to the app. Start an analysis and try chat or interview mode. Confirm that your report appears under **View saved reports**, can be reopened and deleted, and that another account cannot read it. A signed-out request or invalid/expired token should receive HTTP 401; the analysis progress stream is visible only to the account that started it.
 
-The public home, About, and Guide pages remain available without signing in. Analysis jobs, reports, and usage records are stored in PostgreSQL. Browser session storage continues to hold the active report copy and conversational UI state; it is not the durable report store.
+The public home, About, and Guide pages remain available without signing in. Analysis jobs, reports, and usage records are stored in PostgreSQL. Browser session storage also holds the active report copy and conversational UI state.
 
 ---
 
 # 🐳 Run with Docker
 
-The Compose configuration builds the frontend and backend and starts PostgreSQL for durable jobs, reports, and usage data. Redis is not currently used.
+The Compose configuration builds the frontend and backend and starts PostgreSQL for jobs, reports, and usage data. The API process also runs the queue poller; Redis is not required.
 
 After configuring `.env`, build and start both services:
 
@@ -492,7 +502,7 @@ http://localhost:8000/docs
 
 The backend responds at `http://localhost:8000/health`. Compose waits for the backend health check before starting the frontend and reports health for both services.
 
-The backend persists inspection job metadata in PostgreSQL, but analysis workers are scheduled in process memory. Run one backend worker and a single backend replica; use a persistent job queue before scaling horizontally. For deployment behind a reverse proxy, allow the backend's 1 MB request body limit and preserve long-lived responses from `/api/inspect/stream/` and `/api/seer/chat`.
+The backend persists inspection jobs, reports, and usage data in PostgreSQL. Each API instance runs a queue poller and claims jobs using database leases, so interrupted jobs can be retried. Analysis uses the API instance's CPU and memory. For deployment behind a reverse proxy, allow the backend's 1 MB request body limit and preserve long-lived responses from `/api/inspect/stream/` and `/api/seer/chat`.
 
 ### Stop the application
 
@@ -680,10 +690,10 @@ Some important considerations when running Reposeer:
 
 * 🔑 Never commit `.env` files or API keys.
 * 🐍 Repository analysis requires at least one Python source file and currently supports public GitHub repositories only.
-* 🧠 Analysis jobs are currently stored temporarily in memory.
-* 🐙 GitHub ingestion currently supports public repositories.
+* 📦 Local ZIP uploads are not currently supported.
 * 🌐 Configure `REPOSEER_CORS_ORIGINS` for the deployed frontend origin; wildcard origins are rejected.
-* 🔐 Protected API routes verify Supabase bearer tokens and analysis jobs are scoped to their verified owner. Rate limiting is not included.
+* 🔐 Protected API routes verify Supabase bearer tokens and scope analysis jobs and reports to their verified owner.
+* 📊 Quotas apply to accounts and shared client IPs; usage records contain account IDs and keyed IP hashes.
 
 ---
 
@@ -695,9 +705,8 @@ Current limitations include:
 
 * GitHub analysis currently targets public repositories.
 * Static analysis primarily focuses on Python.
-* Analysis job state is held in memory and expires; reports are not synced across devices or stored in user accounts.
 * AI functionality requires a configured Gemini API key.
-* Rate limiting is not included.
+* Paid and Premium checkout is not available; all accounts currently use Free plan limits.
 
 ---
 
@@ -708,10 +717,7 @@ Reposeer is being built toward a more complete repository intelligence platform.
 ### 🔭 Planned
 
 * [ ] 🔐 Private GitHub repository support
-* [ ] 💾 Persistent analysis history
 * [ ] 🌎 Additional programming language parsers
-* [ ] 👤 Authentication and workspace support
-* [ ] ⚡ Background task queue integration
 * [ ] 📊 More detailed architecture metrics
 * [ ] 📄 Exportable inspection reports
 * [ ] ☁️ Production deployment templates
